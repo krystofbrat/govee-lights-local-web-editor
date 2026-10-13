@@ -14,11 +14,13 @@ import { Fades } from './lib/fades.js';
 import { Scheduler } from './lib/scheduler.js';
 import { SceneLibrary } from './lib/library.js';
 import { Trial } from './lib/trial.js';
+import { hostAllowed, parseHostList } from './lib/hosts.js';
 
 const store = loadStore();
 const data = store.data;
 if (process.env.GOVEE_API_KEY && !data.apiKey) data.apiKey = process.env.GOVEE_API_KEY.trim();
 const PORT = +process.env.LIGHTS_PORT || data.port;
+const EXTRA_HOSTS = parseHostList(process.env.LIGHTS_ALLOWED_HOSTS);
 const PUBLIC = path.join(ROOT, 'public');
 // Changes when the web app's files change, so open pages know to reload after an update
 const APP_VERSION = ['public', 'lib/util.js'].flatMap((p) => {
@@ -352,13 +354,6 @@ function removeById(key, id) {
 
 const isLoopback = (addr = '') => addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 
-// Only answer to names this machine could legitimately be reached by (blocks DNS-rebinding tricks)
-function hostAllowed(host = '') {
-  const name = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
-  const me = os.hostname().toLowerCase().replace(/\.local$/, '');
-  return name === 'localhost' || name.endsWith('.local') || name === me || /^[\d.]+$/.test(name) || name.includes(':');
-}
-
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -426,7 +421,10 @@ function serveStatic(pathname, res) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (!hostAllowed(req.headers.host)) return send(res, 403, { error: 'Unknown host' });
+    // Only answer to names this computer could really be reached by (see lib/hosts.js)
+    if (!hostAllowed(req.headers.host, { me: os.hostname(), extra: EXTRA_HOSTS })) {
+      return send(res, 403, { error: 'Unknown host (add it to LIGHTS_ALLOWED_HOSTS to allow it)' });
+    }
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname.startsWith('/api/')) {
       await ready;

@@ -75,7 +75,7 @@ lights help                    # everything else
 
 **Alarms run on your computer, not on the lights.** Govee doesn't let other apps write the timers stored on the light, so the server has to be running when an alarm is due. On macOS it keeps the Mac from sleeping on its own **while it's plugged in** (`caffeinate -s`). On battery or with the lid closed, a MacBook sleeps and alarms won't fire. To let the Mac sleep anyway, set `LIGHTS_ALLOW_SLEEP=1`.
 
-**Anyone on your Wi-Fi can use it.** There's no login: the server listens on your local network so your phone can reach it, which means anyone on the same network can open the web app and control your lights. Requests from other websites and DNS-rebinding tricks are blocked, and the browser only ever sees the last 4 characters of your API key. **Don't port-forward 8420 or expose it to the internet.** For access away from home, use a VPN such as Tailscale.
+**Anyone on your Wi-Fi can use it.** There's no login: the server listens on your local network so your phone can reach it, which means anyone on the same network can open the web app and control your lights. Requests from other websites and DNS-rebinding tricks are blocked, and the browser only ever sees the last 4 characters of your API key. **Don't port-forward 8420 or expose it to the internet.** For access away from home, use a VPN such as Tailscale: open the computer's Tailscale name (like `http://mymac.tail1234.ts.net:8420`) or its 100.x address.
 
 **Your data stays in `data/`.** Settings, alarms, groups, favorites, the API key and the log live in `data/lights.json` (file mode 600) and `data/server.log`. The folder is in `.gitignore`; never commit it.
 
@@ -97,6 +97,7 @@ Everything is set in the app or with `lights` commands. These environment variab
 | `LIGHTS_DATA_DIR` | `./data` | Where settings, the API key and logs are stored |
 | `GOVEE_API_KEY` | | API key to use if none is saved yet |
 | `LIGHTS_ALLOW_SLEEP` | | Set to `1` to let the Mac sleep (alarms may not fire) |
+| `LIGHTS_ALLOWED_HOSTS` | | Extra host names the web app may be opened at, comma-separated (like `lights.example.com,mac.lan`). Exact names only. `localhost`, `*.local`, `*.ts.net`, this computer's name and IP addresses always work |
 | `NO_COLOR` | | Turns off colors in `lights` output |
 
 ## Troubleshooting
@@ -106,6 +107,7 @@ Everything is set in the app or with `lights` commands. These environment variab
 - **A light shows "offline"**: it's unplugged, off Wi-Fi, or Govee's cloud is down. Lights you've used before stay listed; *Forget* one in Settings once you no longer have it.
 - **"Govee rate limit reached"**: wait a minute; see *Cloud limits* above.
 - **Alarm didn't fire**: was the server running and the computer awake? `lights service status` and `lights logs` will tell you.
+- **"Unknown host"**: the app was opened at a name it doesn't know, like a custom DNS name or a reverse proxy. To keep other websites out, it only answers to `localhost`, `*.local`, Tailscale `*.ts.net` names, this computer's name and IP addresses. Add other names to `LIGHTS_ALLOWED_HOSTS`.
 - **Changed the code?** `lights restart`.
 
 ## Developer page
@@ -134,9 +136,10 @@ lib/scheduler.js    alarms and sleep timers
 lib/trial.js        "try" a look for a few seconds, then undo or keep
 lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
+lib/hosts.js        which host names the server answers to (blocks DNS rebinding)
 lib/util.js         colors, times and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, light names and alarms (npm test)
+test/               tests for colors, times, light names, alarms and host names (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

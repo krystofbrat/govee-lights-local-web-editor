@@ -47,3 +47,11 @@ test('value words are the same ones the lights command takes', () => {
   assert.equal(valueAction('movie'), null);
   assert.deepEqual(valueAction('150'), [{ brightness: 100 }, '100%']);
 });
+
+test('brightness below 1% is a decimal', () => {
+  assert.deepEqual(parseDo('0.25'), { action: { brightness: 0.25 }, label: '0.25%' });
+  assert.deepEqual(act('0.5%'), { brightness: 0.5 });
+  assert.deepEqual(act('.1'), { brightness: 0.1 });
+  assert.deepEqual(act('warm 0.1'), { kelvin: 2700, brightness: 0.1 });
+  assert.deepEqual(act('0.0'), { power: false });
+});

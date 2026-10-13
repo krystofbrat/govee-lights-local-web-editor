@@ -173,6 +173,9 @@ svg.i { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none;
 
 .slider-row { display: flex; align-items: center; gap: 12px; }
 .slider-row .range { flex: 1; }
+.dim-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -6px; }
+.dim-row .hint { margin-right: 4px; }
+.chip.small { min-height: 30px; padding: 3px 11px; font-size: 13px; }
 .slider-row output { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
 .slider-row svg.i { color: var(--muted); }
 

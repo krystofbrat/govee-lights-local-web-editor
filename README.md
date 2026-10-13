@@ -24,6 +24,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 - **Govee cloud API**: Govee scenes, DIY scenes and snapshots, music mode, per-segment colors, and lights that don't have LAN Control.
 - **Alarms**: sunrise fade to wake up (deep red → warm → bright white), turn on, turn off with a fade-out, per weekday. At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
 - **One-tap looks** (Bright, Relax, Focus, Movie, Night light) next to your own favorites, and a drag-to-pick **color wheel**.
+- **Dimmer than 1%**: 0.5%, 0.25% or 0.1% for a night light, below the lowest brightness Govee allows (see *Things to know*).
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
 - **My scenes**: every scene you turn on is saved, so it's one tap away next time. *Edit* in the scene list deletes scenes you don't want, including Govee's own ones (only from this app; Govee keeps them, so they can be brought back).
 - **Save what's on now**: keeps every light's own color and brightness as one favorite, including looks set in the Govee app (Govee's API doesn't share the scenes you make in their app, so this is how to bring them over).
@@ -70,6 +71,7 @@ lights                         # status of every light
 lights off                     # everything off
 lights bedroom on              # a light or group, partial names work
 lights desk 40                 # brightness
+lights desk 0.25               # dimmer than 1%
 lights red | lights warm       # color / white (also "#ff8800", 2700)
 lights scene aurora            # Govee scene
 lights fav cozy                # apply a favorite
@@ -144,6 +146,8 @@ Either way, requests from other websites and DNS-rebinding tricks are blocked, a
 **Your data stays in `data/`.** Settings, alarms, groups, favorites, your location (rounded to about 1 km), the API key and the log live in `data/lights.json` (file mode 600) and `data/server.log`. The folder is in `.gitignore`; never commit it.
 
 **Alarms at sunrise or sunset** follow the real sun where you are: set your location in *Settings → Location* or with `lights location <latitude> <longitude>`, then pick *Sun rises* or *Sun sets* in the alarm, up to 4 hours before or after. The times are worked out on your computer (NOAA's formula, no internet needed) and change every day. Near the poles, days without a sunrise or sunset are skipped and logged. A *sunrise fade* is different: it's the wake-up fade from red to white, and it can end at any time, including at sunrise.
+
+**Dimmer than 1%.** Govee's lowest brightness is 1%. Below that, the app sets 1% and a darker version of the same color: 0.25% means a quarter of the color's strength. It only works on lights with color LEDs, whites are made with them too, and moving the brightness back to 1% or more brings the real color back. How much darker it really gets depends on the model; some lights may show dark colors almost as bright as normal ones.
 
 **Cloud limits.** Govee allows 10,000 cloud requests per day per key and limits how fast each light can be changed. The app queues commands per light and prefers LAN when it can. Settings shows today's count.
 

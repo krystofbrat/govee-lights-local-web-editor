@@ -244,7 +244,7 @@ function describe(d) {
   if (s.scene) parts.push(s.scene);
   else if (s.kelvin) parts.push(`${kelvinName(s.kelvin)} white`);
   else if (s.color) parts.push(colorName(s.color));
-  if (s.brightness != null) parts.push(`${s.brightness}%`);
+  if (s.brightness != null) parts.push(`${s.dim || s.brightness}%`);
   return parts.join(' · ') || 'On';
 }
 
@@ -562,6 +562,9 @@ const PANES = [
   ['music', 'Music', 'music'], ['segments', 'Segments', 'grid'], ['more', 'More', 'sliders'],
 ];
 
+// Below Govee's lowest brightness: 1% with a darker color, see withDim in lib/devices.js
+const DIM_LEVELS = [0.5, 0.25, 0.1];
+
 function sheetControl() {
   const ref = ui.sheet.target;
   const devs = targetDevs(ref);
@@ -588,7 +591,9 @@ function sheetControl() {
       <span class="bulb big ${on ? 'lit' : ''}" style="--c:${color}" aria-hidden="true"></span>
       <div class="grow"><h2>${esc(targetName(ref))}</h2><p>${esc(sub)}</p></div>
       ${powerSwitch(ref, on, targetName(ref))}${closeBtn()}`, `
-      <div class="slider-row" style="--c:${color}">${icon('sun')}${range({ input: 'brightness', target: ref, value: bri, cls: on ? '' : 'off', label: 'Brightness' })}<output>${bri}%</output></div>
+      <div class="slider-row" style="--c:${color}">${icon('sun')}${range({ input: 'brightness', target: ref, value: bri, cls: on ? '' : 'off', label: 'Brightness' })}<output>${main.state.dim || bri}%</output></div>
+      ${caps.color ? `<div class="dim-row"><span class="hint">Dimmer than 1%</span>${DIM_LEVELS.map((l) =>
+        `<button class="chip small" data-action="dim" data-target="${ref}" data-level="${l}" aria-pressed="${on && main.state.dim === l}">${l}%</button>`).join('')}</div>` : ''}
       ${looks(ref, { compact: true, add: true, scenes: pane !== 'scenes' })}
       <div class="segmented modes" role="group" aria-label="Mode">${panes.map(([id, label, ic]) => `<button data-action="pane" data-pane="${id}" aria-pressed="${id === pane}">${icon(ic)}${label}</button>`).join('')}</div>
       <div class="field">${body}</div>
@@ -1396,6 +1401,12 @@ const actions = {
     if (ui.tryFirst) tryLook(target, { scene: { name, instance: kind } }, { scene: name }, name);
     else applyScene(target, kind, name);
   },
+  dim(el) {
+    const ref = el.dataset.target, level = +el.dataset.level;
+    patchLocal(ref, { power: true, brightness: 1, dim: level });
+    render();
+    control(ref, { brightness: level });
+  },
   'try-first'() { ui.tryFirst = !ui.tryFirst; saved.set('tryFirst', ui.tryFirst); render(); },
   'try-keep'() { endTrial('keep'); },
   'try-undo'() { endTrial('undo'); },
@@ -1502,7 +1513,7 @@ const actions = {
     const main = lead(targetDevs(ref));
     const s = main.state;
     const last = ui.last[ref] || (s.scene ? { scene: s.scene } : s.kelvin ? { kelvin: s.kelvin } : s.color ? { color: s.color } : {});
-    const f = { action: { ...last, brightness: s.brightness ?? 100 } };
+    const f = { action: { ...last, brightness: s.dim || (s.brightness ?? 100) } };
     openSheet({ kind: 'favorite', draft: { ...favToDraft(f), id: undefined, name: '' } });
   },
   async 'save-fav-draft'() {
@@ -1700,7 +1711,7 @@ const inputs = {
   brightness(el) {
     const ref = el.dataset.target, v = +el.value;
     setOutput(el, `${v}%`);
-    patchLocal(ref, { brightness: v, power: true });
+    patchLocal(ref, { brightness: v, power: true, dim: null });
     sendThrottled(ref, 'bri', { brightness: v });
   },
   kelvin(el) {

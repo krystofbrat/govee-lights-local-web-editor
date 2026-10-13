@@ -34,7 +34,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   ${bold('lights')}                          status of every light
   lights on | off | toggle         all lights
   lights ${dim('<name>')} on | off | toggle  one light or group ${dim('(partial names work: "bed")')}
-  lights ${dim('[name]')} 40                 brightness 1-100 ${dim('(0 = off)')}
+  lights ${dim('[name]')} 40                 brightness 1-100 ${dim('(0 = off, 0.5 / 0.25 / 0.1 = dimmer than 1%)')}
   lights ${dim('[name]')} red | "#ff8800"    color ${dim(`(${Object.keys(COLORS).slice(0, 9).join(', ')}, …)`)}
   lights ${dim('[name]')} warm | 2700        white ${dim(`(${Object.keys(TEMPS).join(', ')} or 2000-9000)`)}
   lights ${dim('[name]')} scene ${dim('<scene>')}     a Govee scene ${dim('— "lights scene aurora"')}
@@ -171,7 +171,7 @@ function lightLine(d, width) {
     else if (s.color) look = s.color;
   }
   const state = !online ? red('offline') : s.power == null ? dim('unknown') : on ? green('on ') : dim('off');
-  const bri = on && s.brightness != null ? `${s.brightness}%` : '';
+  const bri = on && s.brightness != null ? `${s.dim || s.brightness}%` : '';
   const via = { 'lan+cloud': 'local', lan: 'local', cloud: 'cloud', unreachable: '' }[d.via];
   return `  ${on ? swatch(hex || '#ffc98a') : '  '} ${pad(d.name, width)}  ${pad(state, 3)}  ${pad(bri, 4)}  ${pad(look, 26)} ${dim(via)}`;
 }
@@ -270,9 +270,9 @@ async function main(argv) {
       return printStatus(S, ids);
     }
     case 'bright': case 'brightness': case 'dim': {
-      const n = parseInt(rest[0], 10);
-      if (!Number.isFinite(n)) throw new CliError('Usage: lights [name] bright <0-100>');
-      return n === 0 ? act(target, { power: false }, 'off') : act(target, { brightness: n }, `${Math.min(100, n)}%`);
+      const n = parseFloat(rest[0]);
+      if (!Number.isFinite(n)) throw new CliError('Usage: lights [name] bright <0-100>  (below 1, like 0.25, is dimmer than 1%)');
+      return n === 0 ? act(target, { power: false }, 'off') : act(target, { brightness: n }, `${n < 1 ? n : Math.min(100, Math.round(n))}%`);
     }
     case 'color': {
       const c = parseColor(restText);

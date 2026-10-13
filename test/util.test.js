@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseColor, parseKelvin, parseTime, describeDays, kelvinToRgb, hsvToHex, hexToHsv, mixHex, sunriseFrame,
+  parseColor, parseKelvin, parseTime, describeDays, kelvinToRgb, hsvToHex, hexToHsv, mixHex, sunriseFrame, scaleHex,
 } from '../lib/util.js';
 
 test('parseColor accepts names, hex and r,g,b', () => {
@@ -79,4 +79,12 @@ test('sunriseFrame starts dim deep red and ends at the chosen brightness and whi
     assert.ok(brightness >= last, `t=${t.toFixed(2)}`);
     last = brightness;
   }
+});
+
+test('scaleHex darkens a color and keeps its hue, but never to black', () => {
+  assert.equal(scaleHex('#ffa757', 0.25), '#402a16');
+  assert.equal(scaleHex('#ff0000', 0.1), '#1a0000');
+  assert.equal(scaleHex('#ff8800', 1), '#ff8800');
+  assert.equal(scaleHex('#ff8800', 0.001), '#010100'); // the brightest channel stays at least 1
+  assert.equal(scaleHex('#000000', 0.5), '#000000');
 });

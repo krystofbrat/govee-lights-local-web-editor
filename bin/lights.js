@@ -8,6 +8,7 @@ import {
   COLORS, TEMPS, DAY_SETS, DAY_NAMES, sleep, parseColor, parseKelvin, describeDays, hexToRgb, kelvinToHex,
   parseAlarmTime, parseSunTime, describeSunTime, sunTimes, parseLatLon,
 } from '../lib/util.js';
+import { isValueWord, valueAction as parseValue } from '../lib/commands.js';
 
 const PORT = configuredPort();
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -222,21 +223,11 @@ const COMMANDS = new Set([
   'music', 'fav', 'favorite', 'favs', 'favorites', 'sleep', 'timer', 'timers', 'alarm', 'alarms', 'group', 'groups',
   'open', 'ui', 'key', 'location', 'pin', 'refresh', 'scan',
 ]);
-const isValueWord = (w) => /^\d{1,4}%?k?$/i.test(w) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(w) ||
-  !!COLORS[w.toLowerCase()] || !!TEMPS[w.toLowerCase()];
-
-/** "lights <value>" shortcuts: brightness, color or white */
+/** "lights <value>" shortcuts: brightness, color or white (lib/commands.js, shared with Siri/Shortcuts) */
 function valueAction(w) {
-  const l = w.toLowerCase().replace(/%$/, '');
-  if (/^\d{1,3}$/.test(l)) {
-    const n = +l;
-    return n === 0 ? [{ power: false }, 'off'] : [{ brightness: Math.min(100, n) }, `${Math.min(100, n)}%`];
-  }
-  const k = parseKelvin(l);
-  if (k) return [{ kelvin: k }, `${TEMPS[l] ? l + ' white' : 'white'} ${k}K`];
-  const c = parseColor(l);
-  if (c) return [{ color: c }, COLORS[l] ? l : c];
-  throw new CliError(`Don't understand "${w}"`);
+  const v = parseValue(w);
+  if (!v) throw new CliError(`Don't understand "${w}"`);
+  return v;
 }
 
 async function main(argv) {

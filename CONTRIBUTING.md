@@ -34,6 +34,6 @@ To see what the server is doing, open the developer page (`lights dev`, or `/dev
 npm test
 ```
 
-The tests use Node's built-in test runner and don't need lights or an API key. They cover colors, times, sunrise frames and sunrise/sunset times (`lib/util.js`), turning names into lights (`lib/devices.js`), when alarms fire (`lib/scheduler.js`), which host names the server answers to (`lib/hosts.js`), and the PIN (`lib/auth.js`). If you change one of those, add a test next to the others in `test/`. GitHub runs the tests on every pull request.
+The tests use Node's built-in test runner and don't need lights or an API key. They cover colors, times, sunrise frames and sunrise/sunset times (`lib/util.js`), turning names into lights (`lib/devices.js`), when alarms fire (`lib/scheduler.js`), which host names the server answers to (`lib/hosts.js`), the PIN (`lib/auth.js`), and what command words like `warm 40` mean (`lib/commands.js`). If you change one of those, add a test next to the others in `test/`. GitHub runs the tests on every pull request.
 
 Anything that talks to lights (LAN, cloud, fades) can only really be tested with real lights. Please say in your pull request which models you tried it with, and whether they were on Local Wi-Fi or the cloud.

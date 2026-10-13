@@ -464,6 +464,8 @@ const ROUTE_INFO = {
   'GET /api/events': ['A live stream (server-sent events), so it can’t be sent from here. Watch it in the Events tab.'],
   'POST /api/control': ['Change lights. target: "all", "group:ID", "device:ID" or a name. action: power ("toggle" too), brightness, color, kelvin, scene, music, segments or favorite.',
     { target: 'all', action: { power: true, brightness: 60, kelvin: 'warm' } }],
+  'POST /api/shortcut': ['For Siri and Shortcuts: a flat body with the same words as the lights command ("off", "40", "warm 40", "fav cozy", "scene aurora", or a favorite\'s name). Answers with a sentence in "message".',
+    { target: 'all', do: 'warm 40' }],
   'POST /api/try': ['Show a scene or color for 10 seconds, then go back unless it’s kept.', { target: 'all', action: { color: 'teal' }, label: 'Teal' }],
   'POST /api/try/keep': ['Keep what’s being tried.', {}],
   'POST /api/try/undo': ['Go back to how the lights looked before trying.', {}],

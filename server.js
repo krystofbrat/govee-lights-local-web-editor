@@ -17,6 +17,7 @@ import { Trial } from './lib/trial.js';
 import { hostAllowed, parseHostList, fromThisComputer } from './lib/hosts.js';
 import { Pin } from './lib/auth.js';
 import { parseLatLon } from './lib/util.js';
+import { parseDo } from './lib/commands.js';
 
 const store = loadStore();
 const data = store.data;
@@ -167,17 +168,41 @@ route('GET', '/api/events', (req, res) => {
   return undefined;
 });
 
-route('POST', '/api/control', async (req, res, body) => {
-  const ids = devices.resolve(body.target ?? 'all');
-  const action = devices.normalizeAction(body.action || {});
+async function control(target, raw = {}) {
+  const ids = devices.resolve(target ?? 'all');
+  const action = devices.normalizeAction(raw);
   if (!Object.keys(action).length) throw new UserError('Nothing to do');
   // A scene someone picks goes into "My scenes"; one that's part of a favorite doesn't
-  const raw = body.action || {};
   const saveScene = !!action.scene && !raw.favorite && !(raw.preset != null && devices.findFavorite(raw.preset));
   // Changing lights that are trying something on means it's a keeper
   if (trial.covers(ids)) trial.keep();
-  const results = await devices.apply(ids, action, { saveScene });
-  return { results };
+  return devices.apply(ids, action, { saveScene });
+}
+
+route('POST', '/api/control', async (req, res, body) => ({ results: await control(body.target, body.action) }));
+
+/**
+ * For Siri and Apple Shortcuts: a flat body with the same words as the `lights` command, like
+ * { "target": "bedroom", "do": "off" }, and a sentence to show or speak back.
+ */
+route('POST', '/api/shortcut', async (req, res, body) => {
+  const parsed = parseDo(body.do);
+  if (!parsed) throw new UserError('Say what to do in "do", like "off", "40", "warm", "fav cozy" or "scene aurora"');
+  const t = String(body.target ?? '').trim();
+  const results = await control(!t || /^all( lights)?$/i.test(t) ? 'all' : t, parsed.action);
+  const { preset, favorite } = parsed.action;
+  const fav = (preset ?? favorite) != null && devices.findFavorite(preset ?? favorite);
+  // Short enough for Siri to read out: lights with the same outcome together
+  const names = (list) => (list.length > 2 ? `${list.length} lights` : list.map((r) => r.name).join(' and '));
+  const ok = results.filter((r) => r.ok), bad = results.filter((r) => !r.ok);
+  const errors = new Map();
+  for (const r of bad) errors.set(r.error, [...(errors.get(r.error) || []), r]);
+  const message = [
+    preset != null && !fav && bad.length && `No favorite called "${preset}", so it was tried as a scene`,
+    ok.length && `${names(ok)}: ${fav ? `★ ${fav.name}` : parsed.label}`,
+    ...[...errors].map(([error, list]) => `${names(list)}: ${error}`),
+  ].filter(Boolean).join('. ');
+  return { ok: !bad.length, message, results };
 });
 
 route('POST', '/api/try', async (req, res, body) => {

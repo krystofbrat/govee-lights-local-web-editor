@@ -16,6 +16,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
 - **My scenes**: every scene you turn on is saved, so it's one tap away next time. *Edit* in the scene list deletes scenes you don't want, including Govee's own ones (only from this app; Govee keeps them, so they can be brought back).
 - **Save what's on now**: keeps every light's own color and brightness as one favorite, including looks set in the Govee app (Govee's API doesn't share the scenes you make in their app, so this is how to bring them over).
+- **Siri and Shortcuts**: "Hey Siri, movie mode" turns on a favorite, with the same words as the terminal command.
 - **Sleep timers**, **groups/rooms**, **favorites**, and a phone-friendly UI (open it on your phone, then *Add to Home Screen*). Open pages reload by themselves after an update.
 
 ## Requirements
@@ -73,6 +74,46 @@ lights restart | logs          # server control
 lights dev                     # developer page: see how it works
 lights help                    # everything else
 ```
+
+## Siri and Shortcuts
+
+Anything the `lights` command can do, an Apple Shortcut can do too, so Siri can. For example, **"Hey Siri, movie mode"**:
+
+1. In the web app, set your lights the way you like them for a movie. On the Lights tab, tap **★ Save what's on now** and name it **Movie**.
+2. Find your computer's name: on the Mac, *System Settings → General → Sharing*, at the bottom (like `My-Mac.local`). The address under *Settings → On your phone* in the web app works too, but it can change when your router restarts.
+3. On your iPhone, open **Shortcuts**, tap **+**, then **Add Action** and choose **Get Contents of URL**.
+4. Tap **URL** and type `http://My-Mac.local:8420/api/shortcut`, with your computer's name.
+5. Tap **›** next to it to show more options:
+   - **Method**: `POST`
+   - **Headers** (only if you set a PIN): add `X-Lights-Pin` with your PIN as the value
+   - **Request Body**: `JSON`. Add two **Text** fields: `target` = `all`, and `do` = `movie`
+6. Optional, so Siri tells you how it went: add **Get Dictionary Value** (key `message`), then **Speak Text**.
+7. Rename the shortcut to **Movie mode** (tap its name at the top). Now say *"Hey Siri, movie mode"*.
+
+The phone has to be on the same Wi-Fi as the computer, or connected to it with Tailscale.
+
+**`target`** is a light or group, by name (`bedroom`; part of a name works) or `all`. **`do`** takes the same words as the terminal command:
+
+| `do` | What happens |
+| --- | --- |
+| `on`, `off`, `toggle` | Power |
+| `40` | Brightness 40% (`0` is off) |
+| `warm`, `cool`, `2700` | White |
+| `red`, `#ff8800` | Color |
+| `warm 40`, `red 10` | Both at once |
+| `movie`, `fav movie` | A favorite (with no favorite by that name: a Govee scene) |
+| `scene aurora` | A Govee scene |
+| `music` | Music mode |
+
+The answer is JSON, with a sentence in `message` (like `Desk and Lamp: ★ Movie`) and how each light did in `results`. From a terminal on another computer:
+
+```sh
+curl -X POST http://My-Mac.local:8420/api/shortcut \
+  -H 'Content-Type: application/json' -H 'X-Lights-Pin: 482193' \
+  -d '{"target": "bedroom", "do": "off"}'
+```
+
+It only takes POST with a JSON body, so other websites can't trigger it. `POST /api/control` works from Shortcuts too, if you'd rather build the full action yourself (see the API tab of the developer page).
 
 ## Things to know
 
@@ -152,9 +193,10 @@ lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
 lib/hosts.js        which host names the server answers to (blocks DNS rebinding), and requests from this computer
 lib/auth.js         the optional PIN: hashing, login cookies and slowing down guessing
+lib/commands.js     what words like "off", "40", "warm" or "fav cozy" mean, for the CLI and Siri/Shortcuts
 lib/util.js         colors, times, sunrise/sunset and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, sun times, light names, alarms, host names and the PIN (npm test)
+test/               tests for colors, times, sun times, light names, alarms, host names, the PIN and command words (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

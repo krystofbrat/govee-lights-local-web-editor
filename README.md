@@ -3,9 +3,20 @@
 [![CI](https://github.com/krystofbrat/govee-lights-local-web-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofbrat/govee-lights-local-web-editor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A web app and `lights` terminal command for Govee lights, with sunrise alarms, sleep timers, groups and favorites. It runs on your own computer and has **no dependencies** besides Node.js: no `npm install`, no database, no account besides your Govee one.
+A web app and `lights` terminal command for Govee lights, with sunrise alarms, sleep timers, groups, favorites and Siri. It runs on your own computer and has **no dependencies** besides Node.js: no `npm install`, no database, no account besides your Govee one.
 
 > Not affiliated with or endorsed by Govee. It uses Govee's public developer API and the LAN protocol their lights speak.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/lights.png" width="240" alt="The Lights tab on a phone: each light with its color, brightness and power switch, and one-tap looks">
+  <img src="docs/screenshots/color-wheel.png" width="240" alt="One light's controls: a color wheel to drag on, with brightness and white sliders">
+  <img src="docs/screenshots/alarms.png" width="240" alt="The Alarms tab: a sunrise fade on weekdays, and lights that come on 30 minutes before sunset">
+</p>
+<p align="center">
+  <img src="docs/screenshots/try-scene.gif" width="300" alt="Trying a Govee scene: the lights show it for 10 seconds, then go back unless you tap Keep">
+</p>
 
 ## What it does
 

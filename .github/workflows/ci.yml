@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Check syntax
+        run: for f in server.js bin/*.js lib/*.js public/*.js; do node --check "$f"; done
+
+      - name: Run tests
+        run: npm test
+
+      # No API key and no lights here: it should still start and serve the app
+      - name: Start the server
+        env:
+          LIGHTS_DATA_DIR: ${{ runner.temp }}/lights-data
+          LIGHTS_PORT: 8420
+        run: |
+          node server.js &
+          pid=$!
+          for i in $(seq 1 30); do curl -fsS http://localhost:8420/api/state -o state.json && break; sleep 0.5; done
+          grep -q '"devices":\[\]' state.json
+          curl -fsS http://localhost:8420/ | grep -q '<title>Lights</title>'
+          curl -fsS http://localhost:8420/shared/util.js | grep -q 'export function parseColor'
+          kill $pid

@@ -56,6 +56,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights group add ${dim('<group> <light> [light…]')}  /  lights group rm ${dim('<group>')}
 
   lights open                      open the web app in your browser
+  lights dev                       open the developer page ${dim('(live traffic, events, API explorer)')}
   lights key ${dim('<api-key>')}               save your Govee API key
   lights refresh                   look for lights again
   lights service install           run at login ${dim('(needed for alarms to fire reliably)')}
@@ -238,6 +239,7 @@ async function main(argv) {
   if (first === 'restart') { await stop(true); await ensureServer(); return; }
   await ensureServer();
   if (first === 'start') return console.log(`Lights server running on ${BASE.replace('127.0.0.1', 'localhost')}`);
+  if (first === 'dev') return openUi('/dev');
 
   const S = await request('GET', '/api/state');
   if (!args.length) return printStatus(S);
@@ -525,8 +527,8 @@ async function setKey(key) {
   printStatus(await request('GET', '/api/state'));
 }
 
-function openUi() {
-  const url = `http://localhost:${PORT}`;
+function openUi(page = '') {
+  const url = `http://localhost:${PORT}${page}`;
   if (process.platform === 'darwin') execFileSync('open', [url]);
   console.log(url);
 }

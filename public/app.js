@@ -1066,7 +1066,7 @@ function viewSettings() {
     </section>
 
     <section class="section">
-      <div class="section-head"><h2>Terminal</h2></div>
+      <div class="section-head"><h2>Terminal</h2><a class="btn small ghost" href="/dev" style="color:inherit;text-decoration:none" title="See how it works: live traffic, events and an API explorer">${icon('terminal')}Developer page</a></div>
 <pre class="code">lights                    <span class="c"># status of every light</span>
 lights off                <span class="c"># everything off</span>
 lights bedroom on         <span class="c"># a light or group by name</span>

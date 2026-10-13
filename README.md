@@ -1,5 +1,8 @@
 # Lights
 
+[![CI](https://github.com/krystofbrat/govee-lights-local-web-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/krystofbrat/govee-lights-local-web-editor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A web app and `lights` terminal command for Govee lights, with sunrise alarms, sleep timers, groups and favorites. It runs on your own computer and has **no dependencies** besides Node.js: no `npm install`, no database, no account besides your Govee one.
 
 > Not affiliated with or endorsed by Govee. It uses Govee's public developer API and the LAN protocol their lights speak.
@@ -64,6 +67,7 @@ lights alarm add 23:30 off daily --for 15 --lights bedroom
 lights alarms                  # list; lights alarm off|on|rm|test <n>
 lights group add bedroom lamp strip
 lights restart | logs          # server control
+lights dev                     # developer page: see how it works
 lights help                    # everything else
 ```
 
@@ -104,6 +108,19 @@ Everything is set in the app or with `lights` commands. These environment variab
 - **Alarm didn't fire**: was the server running and the computer awake? `lights service status` and `lights logs` will tell you.
 - **Changed the code?** `lights restart`.
 
+## Developer page
+
+Open `http://localhost:8420/dev` (or run `lights dev`, or *Settings → Developer page*) to watch the server work while it runs:
+
+- **Overview**: how a command travels from the app to a light, live status of Local Wi-Fi and the cloud, and the timings it uses.
+- **Lights**: what the server knows about each light, why it uses Local Wi-Fi or the cloud for it, its cloud queue, and the raw JSON.
+- **Traffic**: every message to and from the lights, LAN and cloud, with the exact payload and Govee's answer.
+- **Events**: what the server pushes to open pages, and what changed each time.
+- **Console**: the server's recent output.
+- **API**: every route, with a working example. Send it from the page or copy it as `curl`.
+
+It's read-only except for the API tab, whose requests are real and change your lights. It only works on the computer running the server (other devices on your Wi-Fi get a "not here" message), and it never shows the API key.
+
 ## How it's built
 
 ```text
@@ -118,7 +135,16 @@ lib/trial.js        "try" a look for a few seconds, then undo or keep
 lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
 lib/util.js         colors, times and parsing, shared with the web app
-public/             the web app (plain HTML, CSS and JavaScript, no build step)
+public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
+test/               tests for colors, times, light names and alarms (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to work on the code and run the tests. To report a security problem, see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)

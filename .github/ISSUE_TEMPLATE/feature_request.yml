@@ -1,0 +1,23 @@
+name: Feature request
+description: An idea for the web app or the lights command
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to do?
+      description: Describe what you're trying to do, not only the feature you have in mind. That helps find the best way to do it.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Light model(s)
+      description: If it's about specific lights, their model codes, like H6008.
+  - type: checkboxes
+    id: api
+    attributes:
+      label: Before you ask
+      options:
+        - label: I read "What Govee's API can't do" in the README, and this isn't one of those things
+          required: true

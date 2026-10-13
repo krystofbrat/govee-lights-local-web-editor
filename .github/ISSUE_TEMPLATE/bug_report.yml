@@ -1,0 +1,60 @@
+name: Bug report
+description: Something doesn't work the way the README says it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **don't paste `data/lights.json` or your API key** anywhere in here: the key controls your Govee account.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Light model(s)
+      description: The model code, like H6008 or H619A. It's under each light's name in the web app's Settings, and in the Govee Home app.
+      placeholder: H6008
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: How is the light connected?
+      description: Settings in the web app shows this next to each light.
+      options:
+        - Local Wi-Fi (LAN Control on)
+        - Govee cloud (API key)
+        - Not reachable / Offline
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Web app
+        - Web app on a phone
+        - lights command
+        - Alarms or sleep timers
+        - Starting the server
+  - type: input
+    id: system
+    attributes:
+      label: Computer and Node.js version
+      description: Node's version is what `node -v` prints.
+      placeholder: macOS 26.1, Node 22.12
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: What `lights logs` shows around the time it happened.
+      render: text

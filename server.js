@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { loadStore, ROOT } from './lib/store.js';
+import { format } from 'node:util';
+import { loadStore, ROOT, DATA_DIR } from './lib/store.js';
 import { CloudApi } from './lib/cloud.js';
 import { Lan } from './lib/lan.js';
 import { Devices, UserError, SCENE_KINDS } from './lib/devices.js';
@@ -33,6 +34,7 @@ const cloud = new CloudApi({
     data.usage.count++;
     store.save();
   },
+  onTraffic: (r) => devPush(traffic, 'traffic', { via: 'cloud', ...r, payload: small(r.payload), response: small(r.response) }),
 });
 const lan = new Lan();
 const devices = new Devices({ store, cloud, lan });
@@ -77,7 +79,67 @@ function broadcast(event, payload) {
 }
 
 devices.on('change', () => broadcast('state', snapshot()));
-setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25_000);
+setInterval(() => { for (const res of [...clients, ...devClients]) res.write(': ping\n\n'); }, 25_000);
+
+// ---------- developer page (/dev): what goes over the network, and the server's insides ----------
+
+const DEV_KEEP = 300;
+const devClients = new Set();
+const traffic = [];
+const logs = [];
+let devSeq = 0;
+
+function devPush(list, event, entry) {
+  const item = { n: ++devSeq, t: Date.now(), ...entry };
+  list.push(item);
+  if (list.length > DEV_KEEP) list.shift();
+  broadcastDev(event, item);
+}
+
+// Device lists with every capability can be large; keep the buffer small
+function small(v) {
+  const s = JSON.stringify(v);
+  return s && s.length > 20_000 ? { truncated: `${(s.length / 1024).toFixed(0)} KB, not kept` } : v;
+}
+
+lan.on('traffic', (m) => devPush(traffic, 'traffic', { via: 'lan', ...m, data: small(m.data) }));
+
+// Server output also goes to the developer page
+for (const level of ['log', 'warn', 'error']) {
+  const write = console[level].bind(console);
+  console[level] = (...args) => { write(...args); devPush(logs, 'log', { level, text: format(...args) }); };
+}
+
+function internals() {
+  const q = (x) => (x ? { pending: [...x.jobs.keys()], running: x.running, last: x.last } : null);
+  const mem = process.memoryUsage();
+  return {
+    devices: devices.list().map((d) => ({
+      id: d.id, name: devices.nameOf(d), sku: d.sku, inCloud: d.inCloud,
+      lan: d.lan && { ip: d.lan.ip, lastSeen: d.lan.lastSeen, active: devices.lanActive(d) },
+      state: d.state, stateAt: d.stateAt, poweredAt: d.poweredAt || 0,
+      scenes: d.scenes && Object.fromEntries(SCENE_KINDS.map((k) => [k, d.scenes[k].length])), scenesAt: d.scenesAt,
+      caps: d.caps.length, queue: q(devices.queues.get(d.id)),
+    })),
+    fades: [...fades.jobs].map((j) => ({ label: j.label, ids: [...j.ids], startAt: j.startAt, durationMs: j.durationMs, end: j.end })),
+    lan: { ready: lan.ready, error: lan.error },
+    cloud: { hasKey: !!data.apiKey, error: devices.cloudError, offline: !!devices.cloudOffline, usage: data.usage.day === today() ? data.usage.count : 0 },
+    process: {
+      pid: process.pid, node: process.version, platform: `${process.platform} ${process.arch}`, startedAt: Date.now() - process.uptime() * 1000,
+      rss: mem.rss, heap: mem.heapUsed, dataDir: DATA_DIR, version: APP_VERSION, appPages: clients.size, devPages: devClients.size,
+    },
+    now: Date.now(),
+  };
+}
+
+devices.on('change', () => { if (devClients.size) broadcastDev('internals', internals()); });
+// Fades and queues move without a "change", so keep the page current while it's open
+setInterval(() => { if (devClients.size) broadcastDev('internals', internals()); }, 2000);
+
+function broadcastDev(event, payload) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const res of devClients) res.write(msg);
+}
 
 // ---------- API ----------
 
@@ -85,7 +147,7 @@ const routes = [];
 const route = (method, pattern, fn) => {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '$');
-  routes.push({ method, re, keys, fn });
+  routes.push({ method, pattern, re, keys, fn });
 };
 
 route('GET', '/api/state', () => snapshot());
@@ -248,6 +310,23 @@ route('POST', '/api/settings', async (req, res, body) => {
   return { ok: true };
 });
 
+route('GET', '/api/dev', () => ({ ...internals(), routes: routes.map((r) => ({ method: r.method, path: r.pattern })), traffic, logs }));
+
+route('GET', '/api/dev/events', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.write(`event: internals\ndata: ${JSON.stringify(internals())}\n\n`);
+  devClients.add(res);
+  req.on('close', () => devClients.delete(res));
+  return undefined;
+});
+
+// Everything the server holds about one light, including Govee's raw capability list
+route('GET', '/api/dev/devices/:id', (req, res, body, p) => {
+  const d = devices.get(decodeURIComponent(p.id));
+  if (!d) throw new UserError('Unknown device', 404);
+  return { ...d, view: devices.view(d) };
+});
+
 route('POST', '/api/shutdown', (req, res) => {
   if (!isLoopback(req.socket.remoteAddress)) throw new UserError('Only from this computer', 403);
   setTimeout(shutdown, 50);
@@ -310,6 +389,10 @@ async function handleApi(req, res, url) {
     const origin = req.headers.origin;
     if (origin && new URL(origin).host !== req.headers.host) throw new UserError('Cross-site request blocked', 403);
   }
+  // The developer page shows light IDs, addresses and traffic, so only this computer gets it
+  if (/^\/api\/dev(\/|$)/.test(url.pathname) && !isLoopback(req.socket.remoteAddress)) {
+    throw new UserError('The developer page only works on the computer running the server', 403);
+  }
   for (const r of routes) {
     if (r.method !== req.method) continue;
     const m = url.pathname.match(r.re);
@@ -325,11 +408,13 @@ async function handleApi(req, res, url) {
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
+const PAGES = { '/': 'index.html', '/dev': 'dev.html' };
+
 function serveStatic(pathname, res) {
   let file;
   if (pathname === '/shared/util.js') file = path.join(ROOT, 'lib', 'util.js');
   else {
-    file = path.normalize(path.join(PUBLIC, pathname === '/' ? 'index.html' : decodeURIComponent(pathname)));
+    file = path.normalize(path.join(PUBLIC, PAGES[pathname] || decodeURIComponent(pathname)));
     if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, { error: 'Forbidden' });
   }
   fs.readFile(file, (err, buf) => {

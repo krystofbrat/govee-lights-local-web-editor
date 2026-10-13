@@ -35,6 +35,7 @@ const ICONS = {
   sunset: '<path d="M17 18a5 5 0 0 0-10 0M12 9V2M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M16 5l-4 4-4-4"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   pin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   trash: '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
   play: '<path d="M6 4l14 8-14 8V4z"/>',
   edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -78,6 +79,9 @@ const ui = {
   apiKey: '',
   savingKey: false,
   location: '',        // what's typed in a location field
+  locked: false,       // the server wants a PIN from this device, see start()
+  auth: { pin: false, ok: true, local: false },
+  pinEntry: '', pinError: '', pinBusy: false, newPin: '', currentPin: '',
   saving: false,
 };
 
@@ -91,6 +95,7 @@ async function api(method, url, body) {
   }
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) lock(); // logged out, e.g. the PIN was changed elsewhere
   if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
   return data;
 }
@@ -124,8 +129,34 @@ function patchLocal(target, patch) {
 
 let appVersion = null;
 let clockSkew = 0;     // server clock minus ours, for the trial countdown
+let es = null;
+
+/** Asks whether this device needs the PIN, then shows the PIN screen or connects */
+async function start() {
+  try {
+    ui.auth = await (await fetch('/api/auth')).json();
+  } catch {
+    setTimeout(start, 3000); // server not answering (restarting?)
+    return;
+  }
+  if (!ui.auth.ok) return lock();
+  ui.locked = false;
+  connect();
+}
+
+function lock() {
+  es?.close();
+  connected = false;
+  S = null; // nothing about the lights stays on screen
+  ui.locked = true;
+  ui.sheet = null;
+  render();
+  requestAnimationFrame(() => $('.pin-input')?.focus());
+}
+
 function connect() {
-  const es = new EventSource('/api/events');
+  es?.close();
+  es = new EventSource('/api/events');
   es.addEventListener('state', (e) => {
     S = JSON.parse(e.data);
     clockSkew = S.now - Date.now();
@@ -136,7 +167,12 @@ function connect() {
     render();
   });
   es.addEventListener('toast', (e) => toast(JSON.parse(e.data).msg));
-  es.onerror = () => { connected = false; render(); };
+  es.onerror = () => {
+    connected = false;
+    render();
+    // The browser retries a dropped stream by itself, but not a refused one (PIN needed): find out why
+    if (es.readyState === EventSource.CLOSED) start();
+  };
 }
 
 // ---------- targets ----------
@@ -1143,6 +1179,21 @@ function viewSettings() {
     </section>
 
     <section class="section">
+      <div class="section-head"><h2>PIN</h2>${st.pin ? `<button class="btn small ghost danger" data-action="remove-pin">Remove</button>` : ''}</div>
+      <div class="panel">
+        <div class="slider-row">${icon('lock')}<span style="flex:1">${st.pin
+          ? '<b>PIN is on.</b> <span class="muted">Phones and other computers need it once, then stay unlocked for a year. This computer never needs it.</span>'
+          : '<b>No PIN.</b> <span class="muted">Anyone on your Wi-Fi can open this app and control your lights. Set a PIN to keep them out.</span>'}</span></div>
+        ${st.pin && !ui.auth.local ? `<input class="input" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" placeholder="Current PIN" data-input="current-pin" value="${esc(ui.currentPin)}" aria-label="Current PIN">` : ''}
+        <div class="input-row">
+          <input class="input" type="password" inputmode="numeric" autocomplete="new-password" maxlength="12" placeholder="${st.pin ? 'New PIN' : '4 to 12 digits'}" data-input="new-pin" value="${esc(ui.newPin)}" aria-label="${st.pin ? 'New PIN' : 'PIN'}">
+          <button class="btn primary" data-action="save-pin">${st.pin ? 'Change' : 'Set PIN'}</button>
+        </div>
+        ${st.pin ? '<p class="hint">Changing it logs out every other device.</p>' : ''}
+      </div>
+    </section>
+
+    <section class="section">
       <div class="section-head"><h2>On your phone</h2></div>
       <div class="panel"><div class="slider-row">${icon('phone')}<span>Open on any phone or tablet on the same Wi-Fi, then use “Add to Home Screen”:</span></div>
         ${phone.map((u) => `<code class="code">${esc(u)}</code>`).join('') || '<p class="muted">No network connection.</p>'}</div>
@@ -1157,7 +1208,7 @@ lights desk 40            <span class="c"># brightness</span>
 lights red / lights warm  <span class="c"># color or white</span>
 lights scene aurora       <span class="c"># any Govee scene</span>
 lights sleep 30           <span class="c"># fade out over 30 min</span>
-lights alarm add 7:00 wake weekdays  <span class="c"># sunrise fade</span>
+lights alarm add 7:00 wake weekdays
 lights alarm add sunset-30 on
 lights help               <span class="c"># everything else</span></pre>
     </section>`;
@@ -1168,7 +1219,28 @@ lights help               <span class="c"># everything else</span></pre>
 const VIEWS = { lights: viewLights, scenes: viewScenes, alarms: viewAlarms, settings: viewSettings };
 const SHEETS = { control: sheetControl, alarm: sheetAlarm, group: sheetGroup, favorite: sheetFavorite };
 
+function viewPin() {
+  return `<section class="pin-screen">
+    <span class="pin-icon" aria-hidden="true">${icon('lock')}</span>
+    <h1>Enter the PIN</h1>
+    <p class="muted">These lights have a PIN. This device only needs it once.</p>
+    <div class="input-row">
+      <input class="input pin-input" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" placeholder="PIN"
+        data-input="pin-entry" value="${esc(ui.pinEntry)}" aria-label="PIN" ${ui.pinError ? 'aria-describedby="pin-error"' : ''}>
+      <button class="btn primary" data-action="login" ${ui.pinBusy ? 'disabled' : ''}>${ui.pinBusy ? 'Checking…' : 'Unlock'}</button>
+    </div>
+    ${ui.pinError ? `<p class="pin-error" id="pin-error" role="alert">${esc(ui.pinError)}</p>` : ''}
+    <p class="hint">Forgot it? On the computer running the lights server, run <code>lights pin off</code> or <code>lights pin &lt;new PIN&gt;</code>.</p>
+  </section>`;
+}
+
 function render() {
+  if (ui.locked) {
+    for (const id of ['#tabs', '#top-actions', '#banner', '#sheet-root', '#trial-root']) morphInto($(id), '');
+    morphInto($('#view'), viewPin());
+    document.body.style.overflow = '';
+    return;
+  }
   morphInto($('#tabs'), renderTabs());
   morphInto($('#top-actions'), renderTopActions());
   morphInto($('#banner'), renderBanner());
@@ -1538,6 +1610,33 @@ const actions = {
     navigator.geolocation.getCurrentPosition((p) => saveLocation({ lat: p.coords.latitude, lon: p.coords.longitude }),
       (e) => toast(`Couldn’t get the location: ${e.message}`, 'error'), { timeout: 15_000 });
   },
+  async login() {
+    if (!ui.pinEntry) return;
+    ui.pinBusy = true;
+    ui.pinError = '';
+    render();
+    try {
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ui.pinEntry }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Wrong PIN');
+      ui.pinBusy = false;
+      ui.pinEntry = '';
+      start();
+    } catch (e) {
+      Object.assign(ui, { pinBusy: false, pinEntry: '', pinError: e.message });
+      render();
+      const input = $('.pin-input');
+      if (input) { input.value = ''; input.focus(); } // a focused field keeps what was typed through a render
+    }
+  },
+  'save-pin'() {
+    if (!/^\d{4,12}$/.test(ui.newPin)) return toast('The PIN must be 4 to 12 digits', 'error');
+    changePin(ui.newPin, S.settings.pin ? 'PIN changed — other devices need the new one' : 'PIN set — other devices need it from now on');
+  },
+  'remove-pin'() {
+    if (!confirm('Remove the PIN? Anyone on your Wi-Fi will be able to use the app again.')) return;
+    changePin(null, 'PIN removed');
+  },
   async 'remove-location'() {
     const n = S.alarms.filter((a) => a.enabled && parseSunTime(a.time)).length;
     if (!confirm(n ? `Remove your location? ${n} alarm${n === 1 ? '' : 's'} at sunrise or sunset won’t run until you set it again.` : 'Remove your location?')) return;
@@ -1557,6 +1656,16 @@ const actions = {
     await api('POST', `/api/devices/${encodeURIComponent(d.id)}`, { hidden: !d.hidden }).catch((e) => toast(e.message, 'error'));
   },
 };
+
+async function changePin(pin, done) {
+  if (S.settings.pin && !ui.auth.local && !ui.currentPin) return toast('Type the current PIN first', 'error');
+  try {
+    await api('POST', '/api/pin', { pin, current: ui.currentPin });
+    ui.newPin = ui.currentPin = '';
+    toast(done);
+    render();
+  } catch (e) { toast(e.message, 'error'); }
+}
 
 async function saveLocation(loc) {
   try {
@@ -1611,6 +1720,9 @@ const inputs = {
   },
   'api-key'(el) { ui.apiKey = el.value; },
   location(el) { ui.location = el.value; },
+  'pin-entry'(el) { ui.pinEntry = el.value; },
+  'new-pin'(el) { ui.newPin = el.value; },
+  'current-pin'(el) { ui.currentPin = el.value; },
 };
 
 function pickColor(ref, hex, updateHS = true) {
@@ -1674,6 +1786,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Enter' && e.target.dataset?.input === 'api-key') actions['save-key']();
   if (e.key === 'Enter' && e.target.dataset?.input === 'location') actions['save-location']();
+  if (e.key === 'Enter' && e.target.dataset?.input === 'pin-entry') actions.login();
+  if (e.key === 'Enter' && e.target.dataset?.input === 'new-pin') actions['save-pin']();
 });
 
 // Coming back to the tab: refresh states of cloud-only lights (throttled on the server)
@@ -1685,4 +1799,4 @@ document.addEventListener('visibilitychange', () => {
 setInterval(() => { if (S && !dragEl) render(); }, 20_000);
 
 render();
-connect();
+start();

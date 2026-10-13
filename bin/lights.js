@@ -64,6 +64,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights dev                       open the developer page ${dim('(live traffic, events, API explorer)')}
   lights key ${dim('<api-key>')}               save your Govee API key
   lights location ${dim('<lat> <lon> | off')}  where you are, for alarms at sunrise/sunset ${dim('(e.g. 50.08 14.43)')}
+  lights pin ${dim('<digits> | off')}         a PIN other devices need for the web app ${dim('(this computer never does)')}
   lights refresh                   look for lights again
   lights service install           run at login ${dim('(needed for alarms to fire reliably)')}
   lights service uninstall | status
@@ -219,7 +220,7 @@ const whenText = (time) => (parseSunTime(time) ? describeSunTime(time) : `at ${t
 const COMMANDS = new Set([
   'on', 'off', 'toggle', 'status', 'ls', 'list', 'bright', 'brightness', 'dim', 'color', 'temp', 'scene', 'scenes',
   'music', 'fav', 'favorite', 'favs', 'favorites', 'sleep', 'timer', 'timers', 'alarm', 'alarms', 'group', 'groups',
-  'open', 'ui', 'key', 'location', 'refresh', 'scan',
+  'open', 'ui', 'key', 'location', 'pin', 'refresh', 'scan',
 ]);
 const isValueWord = (w) => /^\d{1,4}%?k?$/i.test(w) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(w) ||
   !!COLORS[w.toLowerCase()] || !!TEMPS[w.toLowerCase()];
@@ -319,6 +320,7 @@ async function main(argv) {
     case 'open': case 'ui': return openUi();
     case 'key': return setKey(rest[0]);
     case 'location': return setLocation(S, rest.join(' '));
+    case 'pin': return setPin(S, rest[0]);
     case 'refresh': case 'scan': {
       process.stderr.write(dim('Looking for lights…\n'));
       return printStatus(await request('POST', '/api/refresh', { full: true }));
@@ -556,6 +558,22 @@ async function setLocation(S, text) {
   if (!parseLatLon(text)) throw new CliError('Usage: lights location <latitude> <longitude>, like: lights location 50.08 14.43 (south and west are negative)');
   const { location: loc } = await request('POST', '/api/settings', { location: text });
   console.log(`${green('✓')} Location set to ${loc.lat}, ${loc.lon} ${dim(`— ${sunToday(loc)}`)}`);
+}
+
+async function setPin(S, value = '') {
+  const v = value.toLowerCase();
+  if (!v) {
+    return console.log(S.settings.pin
+      ? `  PIN is ${green('on')}: other devices need it once, then stay logged in. This computer never needs it.\n  ${dim('Change it: lights pin <digits>   Remove it: lights pin off')}`
+      : `  No PIN: anyone on your Wi-Fi can use the web app.\n  ${dim('Set one: lights pin <4-12 digits>')}`);
+  }
+  if (['off', 'none', 'remove', 'clear'].includes(v)) {
+    await request('POST', '/api/pin', { pin: null });
+    return console.log(`${green('✓')} PIN removed — anyone on your Wi-Fi can use the web app again`);
+  }
+  if (!/^\d{4,12}$/.test(value)) throw new CliError('The PIN must be 4 to 12 digits, like: lights pin 482193');
+  await request('POST', '/api/pin', { pin: value });
+  console.log(`${green('✓')} PIN set. Phones and other computers ask for it once${S.settings.pin ? ' (everyone who was logged in has to enter the new one)' : ''}. This computer never does.`);
 }
 
 function sunToday(loc) {

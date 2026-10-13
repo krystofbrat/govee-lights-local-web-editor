@@ -12,6 +12,7 @@ This app runs on your own computer and controls your lights on your home network
 
 - another website, or a page opened in your browser, controlling your lights or reading app data (the server blocks cross-site requests and DNS rebinding)
 - getting the Govee API key out of the server (the browser only ever sees its last 4 characters)
+- using the app or API without the PIN when one is set, or guessing it faster than 1 try per 30 seconds after 5 wrong ones
 - reading files outside `public/` through the web server
 - a message on the network crashing the server or putting bad data into it
 

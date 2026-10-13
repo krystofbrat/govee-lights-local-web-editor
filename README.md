@@ -66,6 +66,7 @@ lights alarm add 6:45 wake weekdays --for 30   # sunrise fade, done at 6:45
 lights alarm add 23:30 off daily --for 15 --lights bedroom
 lights alarm add sunset-30 on --fav cozy       # 30 min before the sun sets
 lights location 50.08 14.43    # where you are, for sunrise/sunset times
+lights pin 482193              # other devices need this PIN (lights pin off)
 lights alarms                  # list; lights alarm off|on|rm|test <n>
 lights group add bedroom lamp strip
 lights restart | logs          # server control
@@ -77,7 +78,16 @@ lights help                    # everything else
 
 **Alarms run on your computer, not on the lights.** Govee doesn't let other apps write the timers stored on the light, so the server has to be running when an alarm is due. On macOS it keeps the Mac from sleeping on its own **while it's plugged in** (`caffeinate -s`). On battery or with the lid closed, a MacBook sleeps and alarms won't fire. To let the Mac sleep anyway, set `LIGHTS_ALLOW_SLEEP=1`.
 
-**Anyone on your Wi-Fi can use it.** There's no login: the server listens on your local network so your phone can reach it, which means anyone on the same network can open the web app and control your lights. Requests from other websites and DNS-rebinding tricks are blocked, and the browser only ever sees the last 4 characters of your API key. **Don't port-forward 8420 or expose it to the internet.** For access away from home, use a VPN such as Tailscale: open the computer's Tailscale name (like `http://mymac.tail1234.ts.net:8420`) or its 100.x address.
+**Anyone on your Wi-Fi can use it, unless you set a PIN.** The server listens on your local network so your phone can reach it, so without a PIN anyone on the same network can open the web app and control your lights. To keep them out, set one in *Settings → PIN* or with `lights pin <4-12 digits>`:
+
+- Phones and other computers ask for it once, then stay unlocked for a year. Changing the PIN logs them all out.
+- This computer never needs it, so the `lights` command and the developer page keep working. Requests passed on by a proxy running on this computer (like `tailscale serve`) still need it.
+- Only a salted hash of the PIN is stored, never the PIN. After 5 wrong tries in a row, each try has to wait 30 seconds.
+- Shortcuts and `curl` from other devices send it in a header: `Authorization: Bearer <pin>` or `X-Lights-Pin: <pin>`.
+- Forgot it? Run `lights pin off` (or `lights pin <new>`) on the computer.
+- The connection is plain HTTP, so someone who can watch your Wi-Fi traffic could still see the PIN. It keeps out guests and housemates, not a determined attacker on your network.
+
+Either way, requests from other websites and DNS-rebinding tricks are blocked, and the browser only ever sees the last 4 characters of your API key. **Don't port-forward 8420 or expose it to the internet.** For access away from home, use a VPN such as Tailscale: open the computer's Tailscale name (like `http://mymac.tail1234.ts.net:8420`) or its 100.x address.
 
 **Your data stays in `data/`.** Settings, alarms, groups, favorites, your location (rounded to about 1 km), the API key and the log live in `data/lights.json` (file mode 600) and `data/server.log`. The folder is in `.gitignore`; never commit it.
 
@@ -140,10 +150,11 @@ lib/scheduler.js    alarms and sleep timers
 lib/trial.js        "try" a look for a few seconds, then undo or keep
 lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
-lib/hosts.js        which host names the server answers to (blocks DNS rebinding)
+lib/hosts.js        which host names the server answers to (blocks DNS rebinding), and requests from this computer
+lib/auth.js         the optional PIN: hashing, login cookies and slowing down guessing
 lib/util.js         colors, times, sunrise/sunset and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, sun times, light names, alarms and host names (npm test)
+test/               tests for colors, times, sun times, light names, alarms, host names and the PIN (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

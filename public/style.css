@@ -611,6 +611,16 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 36px; 
 .steps { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .steps b { color: var(--text); }
 
+/* ---------- PIN screen ---------- */
+.pin-screen { max-width: 380px; margin: 12vh auto 0; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.pin-screen h1 { font-size: 26px; letter-spacing: -.01em; }
+.pin-screen .input-row { width: 100%; }
+.pin-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 20px; background: var(--card); border: 1px solid var(--line); color: var(--accent); }
+.pin-icon svg.i { width: 28px; height: 28px; }
+.pin-input { font-size: 22px; letter-spacing: .3em; text-align: center; }
+.pin-input::placeholder { letter-spacing: normal; }
+.pin-error { color: var(--danger); font-weight: 600; }
+
 /* ---------- banner & toasts ---------- */
 #banner:empty { display: none; }
 #banner {

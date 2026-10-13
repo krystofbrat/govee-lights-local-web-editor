@@ -14,7 +14,8 @@ import { Fades } from './lib/fades.js';
 import { Scheduler } from './lib/scheduler.js';
 import { SceneLibrary } from './lib/library.js';
 import { Trial } from './lib/trial.js';
-import { hostAllowed, parseHostList } from './lib/hosts.js';
+import { hostAllowed, parseHostList, fromThisComputer } from './lib/hosts.js';
+import { Pin } from './lib/auth.js';
 import { parseLatLon } from './lib/util.js';
 
 const store = loadStore();
@@ -44,6 +45,7 @@ const devices = new Devices({ store, cloud, lan });
 const fades = new Fades(devices);
 const library = (devices.library = new SceneLibrary());
 const trial = new Trial(devices);
+const pin = new Pin(store);
 const clients = new Set();
 const scheduler = new Scheduler({ store, devices, fades, notify: (msg) => broadcast('toast', { msg }) });
 
@@ -63,6 +65,7 @@ function snapshot() {
     trial: trial.view(),
     settings: {
       hasKey: !!data.apiKey,
+      pin: pin.enabled,
       keyHint: data.apiKey ? '••••' + data.apiKey.slice(-4) : '',
       cloudError: devices.cloudError,
       lanReady: lan.ready,
@@ -340,8 +343,38 @@ route('GET', '/api/dev/devices/:id', (req, res, body, p) => {
   return { ...d, view: devices.view(d) };
 });
 
+// ---------- PIN ----------
+
+// The only routes that answer without the PIN: whether one is needed, and entering it
+const OPEN_ROUTES = new Set(['GET /api/auth', 'POST /api/login']);
+
+route('GET', '/api/auth', async (req) => ({ pin: pin.enabled, ok: await pin.allowed(req), local: fromThisComputer(req) }));
+
+route('POST', '/api/login', async (req, res, body) => {
+  if (!pin.enabled) return { ok: true };
+  if (!(await pin.check(String(body.pin ?? '')))) throw new UserError('Wrong PIN', 401);
+  res.setHeader('Set-Cookie', pin.cookie(pin.token()));
+  return { ok: true };
+});
+
+/** Set ({ pin: "1234" }) or remove ({ pin: null }) the PIN. Other devices must give the current one too. */
+route('POST', '/api/pin', async (req, res, body) => {
+  const local = fromThisComputer(req);
+  if (pin.enabled && !local && !(await pin.check(String(body.current ?? '')))) throw new UserError('The current PIN is wrong', 403);
+  if (body.pin === null || body.pin === '' || body.pin === 'off') pin.remove();
+  else {
+    await pin.set(String(body.pin));
+    // Everyone else is logged out; whoever changed it stays in
+    if (!local) res.setHeader('Set-Cookie', pin.cookie(pin.token()));
+  }
+  // Live streams were let in with the old PIN: close them, and they reconnect with whatever they have now
+  setTimeout(() => { for (const c of [...clients, ...devClients]) c.end(); }, 100);
+  devices.changed();
+  return { ok: true, pin: pin.enabled };
+});
+
 route('POST', '/api/shutdown', (req, res) => {
-  if (!isLoopback(req.socket.remoteAddress)) throw new UserError('Only from this computer', 403);
+  if (!fromThisComputer(req)) throw new UserError('Only from this computer', 403);
   setTimeout(shutdown, 50);
   return { ok: true };
 });
@@ -363,7 +396,6 @@ function removeById(key, id) {
 
 // ---------- HTTP plumbing ----------
 
-const isLoopback = (addr = '') => addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -396,13 +428,15 @@ async function handleApi(req, res, url) {
     if (origin && new URL(origin).host !== req.headers.host) throw new UserError('Cross-site request blocked', 403);
   }
   // The developer page shows light IDs, addresses and traffic, so only this computer gets it
-  if (/^\/api\/dev(\/|$)/.test(url.pathname) && !isLoopback(req.socket.remoteAddress)) {
+  if (/^\/api\/dev(\/|$)/.test(url.pathname) && !fromThisComputer(req)) {
     throw new UserError('The developer page only works on the computer running the server', 403);
   }
   for (const r of routes) {
     if (r.method !== req.method) continue;
     const m = url.pathname.match(r.re);
     if (!m) continue;
+    // Every route, live streams included, needs the PIN when one is set (see lib/auth.js)
+    if (!OPEN_ROUTES.has(`${r.method} ${r.pattern}`) && !(await pin.allowed(req))) throw new UserError('Enter the PIN', 401);
     const params = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
     const body = req.method === 'GET' ? {} : await readBody(req);
     const out = await r.fn(req, res, body, params, url);

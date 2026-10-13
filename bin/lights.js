@@ -415,7 +415,9 @@ function listAlarms(S) {
   console.log();
   list.forEach((a, n) => {
     const up = S.upcoming.find((u) => u.id === a.id);
-    const next = a.enabled && up ? dim(`next ${relDay(up.at)} ${fmtTime(up.at)}`) : '';
+    const sunless = a.enabled && !up && parseSunTime(a.time);
+    const next = a.enabled && up ? dim(`next ${relDay(up.at)} ${fmtTime(up.at)}`)
+      : sunless ? yellow(S.settings.location ? 'no sunrise/sunset here this week' : 'needs your location: lights location <lat> <lon>') : '';
     const dot = a.enabled ? green('●') : dim('○');
     const time = a.enabled ? bold(pad(a.time, width)) : dim(pad(a.time, width));
     console.log(`  ${dim(String(n + 1).padStart(2))}  ${dot} ${time}  ${pad(alarmLabel(a), 24)} ${pad(describeDays(a.days), 14)} ${pad(a.target.map((r) => refName(S, r)).join(', '), 16)} ${next}`);

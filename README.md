@@ -166,6 +166,8 @@ Everything is set in the app or with `lights` commands. These environment variab
 | `LIGHTS_ALLOWED_HOSTS` | | Extra host names the web app may be opened at, comma-separated (like `lights.example.com,mac.lan`). Exact names only. `localhost`, `*.local`, `*.ts.net`, this computer's name and IP addresses always work |
 | `NO_COLOR` | | Turns off colors in `lights` output |
 
+On macOS, `lights service install` saves the `LIGHTS_*` variables that are set when you run it, so they still apply at login and after `lights restart`. `lights service status` shows them. To change them, set them and run `lights service install` again; to drop one, unset it first. Keep `LIGHTS_PORT` and `LIGHTS_DATA_DIR` in your shell profile too (like `~/.zshrc`), because `lights` commands need them to find the server. `GOVEE_API_KEY` is never saved there: the service file is readable by other users on the Mac, and the key is already kept safely in `data/`.
+
 ## Troubleshooting
 
 - **No lights found**: check the API key (`lights key <key>`), switch on LAN Control, then `lights refresh`. The computer must be on the same network as the lights for LAN.
@@ -204,10 +206,11 @@ lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
 lib/hosts.js        which host names the server answers to (blocks DNS rebinding), and requests from this computer
 lib/auth.js         the optional PIN: hashing, login cookies and slowing down guessing
+lib/service.js      the macOS start-at-login service file, with saved LIGHTS_* settings
 lib/commands.js     what words like "off", "40", "warm" or "fav cozy" mean, for the CLI and Siri/Shortcuts
 lib/util.js         colors, times, sunrise/sunset and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, sun times, light names, alarms, host names, the PIN and command words (npm test)
+test/               tests for colors, times, sun times, light names, alarms, host names, the PIN, command words and the service file (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

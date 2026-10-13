@@ -9,6 +9,7 @@ import {
   parseAlarmTime, parseSunTime, describeSunTime, sunTimes, parseLatLon,
 } from '../lib/util.js';
 import { isValueWord, valueAction as parseValue } from '../lib/commands.js';
+import { serviceEnv, servicePlist } from '../lib/service.js';
 
 const PORT = configuredPort();
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -67,7 +68,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights location ${dim('<lat> <lon> | off')}  where you are, for alarms at sunrise/sunset ${dim('(e.g. 50.08 14.43)')}
   lights pin ${dim('<digits> | off')}         a PIN other devices need for the web app ${dim('(this computer never does)')}
   lights refresh                   look for lights again
-  lights service install           run at login ${dim('(needed for alarms to fire reliably)')}
+  lights service install           run at login ${dim('(needed for alarms to fire reliably; keeps LIGHTS_* settings)')}
   lights service uninstall | status
   lights start | stop | restart | logs
 `;
@@ -589,28 +590,15 @@ function nodePath() {
   return process.execPath;
 }
 
-const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-function plist() {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${xml(nodePath())}</string>
-    <string>${xml(path.join(ROOT, 'server.js'))}</string>
-  </array>
-  <key>WorkingDirectory</key><string>${xml(ROOT)}</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>StandardOutPath</key><string>${xml(LOG_FILE)}</string>
-  <key>StandardErrorPath</key><string>${xml(LOG_FILE)}</string>
-</dict>
-</plist>
-`;
+/** The LIGHTS_* settings saved with the installed service, or null if there's no service */
+function savedServiceEnv() {
+  if (!serviceInstalled()) return null;
+  try {
+    return JSON.parse(execFileSync('plutil', ['-extract', 'EnvironmentVariables', 'json', '-o', '-', PLIST], { stdio: ['ignore', 'pipe', 'ignore'] }).toString());
+  } catch { return {}; } // installed without any
 }
+
+const envLine = (env) => Object.entries(env).map(([k, v]) => `${k}=${v}`).join('  ');
 
 async function service(sub) {
   if (process.platform !== 'darwin') throw new CliError('"lights service" is macOS only. Elsewhere, run "node server.js" from your init system.');
@@ -620,10 +608,18 @@ async function service(sub) {
     fs.mkdirSync(path.dirname(PLIST), { recursive: true });
     fs.mkdirSync(DATA_DIR, { recursive: true });
     try { execFileSync('launchctl', ['bootout', `${domain}/${LABEL}`], { stdio: 'ignore' }); } catch {}
-    fs.writeFileSync(PLIST, plist());
+    const env = serviceEnv();
+    fs.writeFileSync(PLIST, servicePlist({
+      label: LABEL, node: nodePath(), server: path.join(ROOT, 'server.js'), root: ROOT, log: LOG_FILE, env,
+    }));
     execFileSync('launchctl', ['bootstrap', domain, PLIST]);
     for (let i = 0; i < 40 && !(await serverUp()); i++) await sleep(250);
     console.log(`${green('✓')} Lights server installed — it starts at login and restarts if it crashes.`);
+    if (Object.keys(env).length) {
+      console.log(`  Saved with it: ${envLine(env)}`);
+      if (env.LIGHTS_PORT || env.LIGHTS_DATA_DIR) console.log(yellow(`  Keep LIGHTS_PORT / LIGHTS_DATA_DIR set in your shell profile too, so lights commands find the server.`));
+      console.log(dim('  To change them, set them and run "lights service install" again.'));
+    }
     console.log(dim(`  ${PLIST}\n  Web app: http://localhost:${PORT}`));
     return;
   }
@@ -633,7 +629,9 @@ async function service(sub) {
     return console.log(`${green('✓')} Removed. The server no longer starts at login.`);
   }
   const running = await serverUp();
-  console.log(`  Service:  ${serviceInstalled() ? green('installed (starts at login)') : yellow('not installed — run "lights service install"')}`);
+  const env = savedServiceEnv();
+  console.log(`  Service:  ${env ? green('installed (starts at login)') : yellow('not installed — run "lights service install"')}`);
+  if (env) console.log(`  Settings: ${Object.keys(env).length ? envLine(env) : dim('none saved (LIGHTS_* variables set when installing are kept)')}`);
   console.log(`  Server:   ${running ? green(`running on http://localhost:${PORT}`) : dim('not running')}`);
 }
 

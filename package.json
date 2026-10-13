@@ -1,0 +1,16 @@
+{
+  "name": "govee-lights",
+  "version": "1.0.0",
+  "description": "Local web app + terminal commands for Govee lights (LAN + Cloud API), with sunrise alarms and sleep timers",
+  "type": "module",
+  "bin": {
+    "lights": "bin/lights.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

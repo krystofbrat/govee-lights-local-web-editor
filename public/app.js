@@ -133,13 +133,18 @@ let es = null;
 
 /** Asks whether this device needs the PIN, then shows the PIN screen or connects */
 async function start() {
+  let auth;
   try {
-    ui.auth = await (await fetch('/api/auth')).json();
+    const res = await fetch('/api/auth');
+    auth = res.ok ? await res.json() : null;
   } catch {
     setTimeout(start, 3000); // server not answering (restarting?)
     return;
   }
-  if (!ui.auth.ok) return lock();
+  // Only a server that has a PIN and says this device hasn't given it shows the PIN screen. Anything else,
+  // like a server still running older code without /api/auth, never asks for one.
+  ui.auth = { pin: false, ok: true, local: false, ...auth };
+  if (ui.auth.pin === true && ui.auth.ok === false) return lock();
   ui.locked = false;
   connect();
 }

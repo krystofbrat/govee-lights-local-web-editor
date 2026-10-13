@@ -547,6 +547,8 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 36px; 
 .alarm-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
 .alarm-meta .type { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; }
 .alarm-meta .type svg.i { width: 16px; height: 16px; color: var(--accent); }
+.alarm-meta .sun-when { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.alarm-meta .sun-when svg.i { width: 14px; height: 14px; }
 .alarm-meta .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; color: var(--muted); }
 .sub-text { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .day-dots { display: inline-flex; gap: 2px; flex: none; }

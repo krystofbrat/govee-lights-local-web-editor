@@ -483,7 +483,7 @@ const ROUTE_INFO = {
   'DELETE /api/favorites/:id': ['Delete a favorite.'],
   'POST /api/devices/:id': ['Rename ("name") or hide ("hidden") a light. An empty name goes back to Govee’s.', { name: 'Desk lamp' }],
   'DELETE /api/devices/:id': ['Forget a light you no longer have.'],
-  'POST /api/settings': ['"apiKey" checks a Govee API key, then saves it. An empty "apiKey" removes the saved one.', {}],
+  'POST /api/settings': ['"apiKey" checks a Govee API key, then saves it; an empty one removes it. "location": "50.08, 14.43" sets where you are (for sun times), null removes it.', { location: '50.08, 14.43' }],
   'POST /api/shutdown': ['Stops the server. Only accepted from this computer.', {}],
   'GET /api/dev': ['What this page reads: the server’s insides, its routes, recent traffic and output.'],
   'GET /api/dev/events': ['This page’s live stream, so it can’t be sent from here.'],

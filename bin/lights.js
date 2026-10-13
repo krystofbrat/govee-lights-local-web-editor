@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ROOT, DATA_DIR, LOG_FILE, configuredPort } from '../lib/store.js';
 import {
-  COLORS, TEMPS, DAY_SETS, DAY_NAMES, sleep, parseColor, parseKelvin, parseTime, describeDays, hexToRgb, kelvinToHex,
+  COLORS, TEMPS, DAY_SETS, DAY_NAMES, sleep, parseColor, parseKelvin, describeDays, hexToRgb, kelvinToHex,
+  parseAlarmTime, parseSunTime, describeSunTime, sunTimes, parseLatLon,
 } from '../lib/util.js';
 
 const PORT = configuredPort();
@@ -43,13 +44,17 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights timers ${dim('[cancel]')}           list or cancel sleep timers
 
   ${bold('lights alarms')}                   list alarms
-  lights alarm add ${dim('<time> [sunrise|on|off] [days] [options]')}
+  lights alarm add ${dim('<when> [wake|on|off] [days] [options]')}
+      when     7:00 | 6:30am  ${dim('or the real sun:')} sunrise | sunset | sunset-30 | sunrise+15
+               ${dim('(minutes before/after; needs "lights location")')}
+      wake     sunrise fade: glows from red to white, done at <when> ${dim('(the default)')}
+      on, off  turn on, or turn off ${dim('(with --for: fade out)')}
       days     weekdays | weekends | daily | once | mon,wed,fri   ${dim('(default daily)')}
-      options  --lights <name>  --name <label>  --for <min> ${dim('(sunrise length / fade-out)')}
+      options  --lights <name>  --name <label>  --for <min> ${dim('(sunrise fade length / fade-out)')}
                --brightness <n>  --color <c>  --temp <k>  --fav <favorite>  --scene <scene>
-      ${dim('lights alarm add 6:45 sunrise weekdays --for 30')}
+      ${dim('lights alarm add 6:45 wake weekdays --for 30')}
       ${dim('lights alarm add 23:30 off daily --for 15 --lights bedroom')}
-      ${dim('lights alarm add 18:00 on --lights desk --fav "cozy"')}
+      ${dim('lights alarm add sunset-30 on --lights desk --fav "cozy"')}
   lights alarm on | off | rm | test ${dim('<number|name>')}
 
   lights groups                    list groups
@@ -58,6 +63,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights open                      open the web app in your browser
   lights dev                       open the developer page ${dim('(live traffic, events, API explorer)')}
   lights key ${dim('<api-key>')}               save your Govee API key
+  lights location ${dim('<lat> <lon> | off')}  where you are, for alarms at sunrise/sunset ${dim('(e.g. 50.08 14.43)')}
   lights refresh                   look for lights again
   lights service install           run at login ${dim('(needed for alarms to fire reliably)')}
   lights service uninstall | status
@@ -201,16 +207,19 @@ async function act(target, action, label) {
 }
 
 function alarmLabel(a) {
-  const base = a.type === 'sunrise' ? `Sunrise ${a.duration} min` : a.type === 'off' ? (a.fade ? `Fade out ${a.fade} min` : 'Off') : 'On';
+  const base = a.type === 'sunrise' ? `Sunrise fade ${a.duration} min` : a.type === 'off' ? (a.fade ? `Fade out ${a.fade} min` : 'Off') : 'On';
   return a.name ? `${a.name} (${base})` : base;
 }
+
+/** "at 07:00" or "30 min before sunset" */
+const whenText = (time) => (parseSunTime(time) ? describeSunTime(time) : `at ${time}`);
 
 // ---------- commands ----------
 
 const COMMANDS = new Set([
   'on', 'off', 'toggle', 'status', 'ls', 'list', 'bright', 'brightness', 'dim', 'color', 'temp', 'scene', 'scenes',
   'music', 'fav', 'favorite', 'favs', 'favorites', 'sleep', 'timer', 'timers', 'alarm', 'alarms', 'group', 'groups',
-  'open', 'ui', 'key', 'refresh', 'scan',
+  'open', 'ui', 'key', 'location', 'refresh', 'scan',
 ]);
 const isValueWord = (w) => /^\d{1,4}%?k?$/i.test(w) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(w) ||
   !!COLORS[w.toLowerCase()] || !!TEMPS[w.toLowerCase()];
@@ -309,6 +318,7 @@ async function main(argv) {
     case 'group': return group(S, rest);
     case 'open': case 'ui': return openUi();
     case 'key': return setKey(rest[0]);
+    case 'location': return setLocation(S, rest.join(' '));
     case 'refresh': case 'scan': {
       process.stderr.write(dim('Looking for lights…\n'));
       return printStatus(await request('POST', '/api/refresh', { full: true }));
@@ -398,13 +408,14 @@ const sortedAlarms = (S) => [...S.alarms].sort((a, b) => a.time.localeCompare(b.
 
 function listAlarms(S) {
   const list = sortedAlarms(S);
-  if (!list.length) return console.log(dim('No alarms yet. Try: lights alarm add 7:00 sunrise weekdays'));
+  if (!list.length) return console.log(dim('No alarms yet. Try: lights alarm add 7:00 wake weekdays'));
+  const width = Math.max(...list.map((a) => a.time.length));
   console.log();
   list.forEach((a, n) => {
     const up = S.upcoming.find((u) => u.id === a.id);
     const next = a.enabled && up ? dim(`next ${relDay(up.at)} ${fmtTime(up.at)}`) : '';
     const dot = a.enabled ? green('●') : dim('○');
-    const time = a.enabled ? bold(a.time) : dim(a.time);
+    const time = a.enabled ? bold(pad(a.time, width)) : dim(pad(a.time, width));
     console.log(`  ${dim(String(n + 1).padStart(2))}  ${dot} ${time}  ${pad(alarmLabel(a), 24)} ${pad(describeDays(a.days), 14)} ${pad(a.target.map((r) => refName(S, r)).join(', '), 16)} ${next}`);
   });
   console.log(dim(`\n  lights alarm on|off|rm|test <number>`));
@@ -416,7 +427,7 @@ function findAlarm(S, q) {
   const list = sortedAlarms(S);
   if (/^\d+$/.test(q) && list[+q - 1]) return list[+q - 1];
   const byName = findByName(list.filter((a) => a.name), q, 'alarms');
-  const byTime = list.filter((a) => a.time === parseTime(q));
+  const byTime = list.filter((a) => a.time === parseAlarmTime(q));
   const hit = byName || (byTime.length === 1 ? byTime[0] : null);
   if (!hit) throw new CliError(`No alarm "${q}". See: lights alarms`);
   return hit;
@@ -434,12 +445,15 @@ function parseAlarmArgs(S, rest) {
     if (rest[i].startsWith('--')) opts[rest[i].slice(2)] = rest[++i];
     else pos.push(rest[i]);
   }
-  const time = parseTime(pos.shift());
-  if (!time) throw new CliError('Usage: lights alarm add <time> [sunrise|on|off] [days] — e.g. 7:00, 6:30am');
+  // "sunset -30" typed with a space is one time
+  if (parseSunTime(pos[0]) && /^[+-]\d+$/.test(pos[1] || '')) pos.splice(0, 2, pos[0] + pos[1]);
+  const time = parseAlarmTime(pos.shift());
+  if (!time) throw new CliError('Usage: lights alarm add <when> [wake|on|off] [days] — when: 7:00, 6:30am, sunset, sunrise+15, sunset-30');
   let type = 'sunrise';
   let days = [...DAY_SETS.daily];
   for (const w of pos) {
     const l = w.toLowerCase();
+    // After the time, "sunrise" still means the sunrise fade, as it always has
     if (['sunrise', 'wake', 'wakeup', 'on', 'off', 'sleep'].includes(l)) type = { wake: 'sunrise', wakeup: 'sunrise', sleep: 'off' }[l] || l;
     else if (l === 'everyday') days = [...DAY_SETS.daily];
     else if (DAY_SETS[l]) days = [...DAY_SETS[l]];
@@ -467,7 +481,7 @@ async function alarm(S, rest) {
     const a = await request('POST', '/api/alarms', draft);
     const after = await request('GET', '/api/state');
     const up = after.upcoming.find((u) => u.id === a.id);
-    console.log(`${green('✓')} ${alarmLabel(a)} at ${a.time}, ${describeDays(a.days).toLowerCase()}${up ? dim(` — next ${relDay(up.at)} ${fmtTime(up.at)}`) : ''}`);
+    console.log(`${green('✓')} ${alarmLabel(a)} ${whenText(a.time)}, ${describeDays(a.days).toLowerCase()}${up ? dim(` — next ${relDay(up.at)} ${fmtTime(up.at)}`) : ''}`);
     if (!serviceInstalled()) console.log(dim(`  Tip: run "lights service install" so alarms fire even after a restart.`));
     return;
   }
@@ -475,11 +489,11 @@ async function alarm(S, rest) {
   if (sub === 'on' || sub === 'enable' || sub === 'off' || sub === 'disable') {
     const enabled = sub === 'on' || sub === 'enable';
     await request('POST', '/api/alarms', { ...a, enabled });
-    return console.log(`${green('✓')} ${alarmLabel(a)} at ${a.time} ${enabled ? 'on' : 'off'}`);
+    return console.log(`${green('✓')} ${alarmLabel(a)} ${whenText(a.time)} ${enabled ? 'on' : 'off'}`);
   }
   if (sub === 'rm' || sub === 'delete' || sub === 'remove') {
     await request('DELETE', `/api/alarms/${a.id}`);
-    return console.log(`${green('✓')} Deleted ${alarmLabel(a)} at ${a.time}`);
+    return console.log(`${green('✓')} Deleted ${alarmLabel(a)} ${whenText(a.time)}`);
   }
   if (sub === 'test' || sub === 'preview') {
     await request('POST', '/api/alarms/preview', a);
@@ -525,6 +539,29 @@ async function setKey(key) {
   const r = await request('POST', '/api/settings', { apiKey: key });
   console.log(`${green('✓')} API key saved — found ${r.lights} light(s) in your Govee account`);
   printStatus(await request('GET', '/api/state'));
+}
+
+async function setLocation(S, text) {
+  const t = text.trim().toLowerCase();
+  if (!t) {
+    const loc = S.settings.location;
+    if (!loc) return console.log(dim('No location set. For alarms at sunrise or sunset: lights location <latitude> <longitude>  (e.g. 50.08 14.43)'));
+    return console.log(`  ${loc.lat}, ${loc.lon}  ${dim(sunToday(loc))}`);
+  }
+  if (['off', 'none', 'remove', 'clear'].includes(t)) {
+    await request('POST', '/api/settings', { location: null });
+    const sun = S.alarms.filter((a) => a.enabled && parseSunTime(a.time)).length;
+    return console.log(`${green('✓')} Location removed${sun ? yellow(` — ${sun} alarm(s) at sunrise/sunset won't run until you set one again`) : ''}`);
+  }
+  if (!parseLatLon(text)) throw new CliError('Usage: lights location <latitude> <longitude>, like: lights location 50.08 14.43 (south and west are negative)');
+  const { location: loc } = await request('POST', '/api/settings', { location: text });
+  console.log(`${green('✓')} Location set to ${loc.lat}, ${loc.lon} ${dim(`— ${sunToday(loc)}`)}`);
+}
+
+function sunToday(loc) {
+  const s = sunTimes(new Date(), loc.lat, loc.lon);
+  if (s.polar) return s.polar === 'day' ? 'the sun stays up all day today' : 'the sun stays down all day today';
+  return `today: sunrise ${fmtTime(s.sunrise)}, sunset ${fmtTime(s.sunset)}`;
 }
 
 function openUi(page = '') {

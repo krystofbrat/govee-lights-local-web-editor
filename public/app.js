@@ -1,5 +1,6 @@
 import {
   COLORS, TEMPS, DAY_NAMES, DAY_SETS, clamp, kelvinToHex, hsvToHex, hexToHsv, hexToRgb, describeDays, sunriseFrame,
+  parseSunTime, sunTimeText, describeSunTime, sunTimes, parseLatLon,
 } from '/shared/util.js';
 
 // ---------- small helpers ----------
@@ -31,6 +32,9 @@ const ICONS = {
   refresh: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
   sunrise: '<path d="M17 18a5 5 0 0 0-10 0M12 2v7M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M8 6l4-4 4 4"/>',
+  sunset: '<path d="M17 18a5 5 0 0 0-10 0M12 9V2M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M16 5l-4 4-4-4"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  pin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
   trash: '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
   play: '<path d="M6 4l14 8-14 8V4z"/>',
   edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -73,6 +77,7 @@ const ui = {
   tryFirst: saved.get('tryFirst', true), // tapping a scene or color only tries it, see trialBar
   apiKey: '',
   savingKey: false,
+  location: '',        // what's typed in a location field
   saving: false,
 };
 
@@ -260,11 +265,6 @@ function fmtAgo(ms) {
   if (m < 1440) return `${Math.round(m / 60)} h ago`;
   const d = Math.round(m / 1440);
   return d === 1 ? 'yesterday' : `${d} days ago`;
-}
-function addMinutes(hm, mins) {
-  const [h, m] = hm.split(':').map(Number);
-  const t = (((h * 60 + m + mins) % 1440) + 1440) % 1440;
-  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
 // ---------- DOM morphing (re-render without losing focus or slider drags) ----------
@@ -749,14 +749,15 @@ function viewScenes() {
 
 // ---------- Alarms tab ----------
 
+// Type "sunrise" is the wake-up fade. It's not the same as an alarm *at* sunrise (a sun time, see parseSunTime)
 const TYPE_INFO = {
-  sunrise: { label: 'Sunrise wake-up', short: 'Sunrise', icon: 'sunrise' },
+  sunrise: { label: 'Sunrise fade (wake-up)', short: 'Sunrise fade', icon: 'sunrise' },
   on: { label: 'Turn on', short: 'Turn on', icon: 'bulb' },
   off: { label: 'Turn off', short: 'Turn off', icon: 'moon' },
 };
 
 function alarmLine(a) {
-  if (a.type === 'sunrise') return `Sunrise · ${a.duration} min`;
+  if (a.type === 'sunrise') return `Sunrise fade · ${a.duration} min`;
   if (a.type === 'on') return `Turn on · ${describeAction(a.action)}`;
   return a.fade ? `Fade out · ${a.fade} min` : 'Turn off';
 }
@@ -773,20 +774,28 @@ function dayDots(days) {
     .map((n) => `<span class="${days.includes(n) ? 'on' : ''}" aria-hidden="true">${DAY_NAMES[n][0]}</span>`).join('')}</span>`;
 }
 
+const smallAmPm = (text) => esc(text).replace(/\s*([AaPp]\.?\s?[Mm]\.?)$/, '<small>$1</small>');
+
 function alarmCard(a) {
   const up = S.upcoming.find((u) => u.id === a.id);
+  const sun = parseSunTime(a.time);
   const now = Date.now();
   let next = '';
   if (a.enabled && up) {
     next = a.type === 'sunrise'
       ? `Starts ${relDay(up.start, true)} ${fmtTime(up.start)} · in ${fmtDuration(up.start - now)}`
       : `${relDay(up.at)} · in ${fmtDuration(up.at - now)}`;
+  } else if (a.enabled && sun) {
+    next = S.settings.location ? `No ${sun.event} here in the next week` : 'Needs your location (Settings)';
   }
   const sub = [a.target.map(targetName).join(', '), a.name ? alarmLine(a) : ''].filter(Boolean).join(' · ');
+  // Sun times show when they'll actually happen next, and what they follow
+  const time = sun ? (up ? fmtTime(up.at) : cap(sun.event)) : fmtHM(a.time);
   return `<article class="alarm ${a.enabled ? '' : 'disabled'}" data-key="a-${a.id}" style="--strip:${alarmStrip(a)}">
     <button class="alarm-main" data-action="edit-alarm" data-id="${a.id}">
-      <span class="alarm-time">${fmtHM(a.time).replace(/\s*([AaPp]\.?\s?[Mm]\.?)$/, '<small>$1</small>')}</span>
+      <span class="alarm-time">${smallAmPm(time)}</span>
       <span class="alarm-meta">
+        ${sun ? `<span class="sun-when">${icon(sun.event)}${esc(cap(describeSunTime(a.time)))}</span>` : ''}
         <span class="type">${icon(TYPE_INFO[a.type].icon)}${esc(a.name || alarmLine(a))}</span>
         <span class="sub">${dayDots(a.days)}<span class="sub-text">${esc(sub)}</span></span>
         ${next ? `<span class="next">${esc(next)}</span>` : ''}
@@ -825,8 +834,8 @@ function viewAlarms() {
     <section class="section">
       <div class="section-head"><h2>Alarms</h2><button class="btn small primary" data-action="new-alarm">${icon('plus')}New alarm</button></div>
       ${alarms.length ? `<div class="alarm-list">${alarms.map(alarmCard).join('')}</div>` : `<div class="empty"><div class="glow"></div><h2>Wake up to light</h2>
-        <p>A sunrise alarm slowly fades your lights from deep red to bright white, so you wake up gently, before your phone alarm goes off.</p>
-        <button class="btn primary" data-action="new-alarm">${icon('sunrise')}Create a sunrise alarm</button></div>`}
+        <p>A sunrise fade slowly brings your lights from deep red to bright white, so you wake up gently, before your phone alarm goes off. Alarms can also follow the real sun, like “30 minutes before sunset”.</p>
+        <button class="btn primary" data-action="new-alarm">${icon('sunrise')}Create a sunrise fade</button></div>`}
     </section>
     <section class="section">
       <div class="section-head"><h2>Sleep timer</h2></div>
@@ -845,7 +854,7 @@ function viewAlarms() {
 
 function newAlarmDraft() {
   return {
-    type: 'sunrise', time: '07:00', days: [...DAY_SETS.weekdays], target: ['all'], name: '', enabled: true,
+    type: 'sunrise', time: '07:00', when: 'clock', offset: 0, days: [...DAY_SETS.weekdays], target: ['all'], name: '', enabled: true,
     duration: 30, brightness: 100, kelvin: 4000, fade: 15,
     onMode: 'white', onBrightness: 80, onColor: COLORS.orange, onKelvin: 3000, onFavorite: S.favorites[0]?.id || '', onScene: '',
   };
@@ -853,6 +862,8 @@ function newAlarmDraft() {
 
 function alarmToDraft(a) {
   const d = { ...newAlarmDraft(), ...structuredClone(a) };
+  const sun = parseSunTime(a.time);
+  if (sun) Object.assign(d, { when: sun.event, offset: sun.offset, time: '07:00' });
   const x = a.action || {};
   if (a.type === 'on') {
     d.onBrightness = x.brightness ?? 100;
@@ -866,7 +877,8 @@ function alarmToDraft(a) {
 }
 
 function draftToAlarm(d) {
-  const a = { id: d.id, name: d.name.trim(), enabled: d.enabled, type: d.type, time: d.time, days: d.days, target: d.target.length ? d.target : ['all'] };
+  const time = d.when === 'clock' ? d.time : sunTimeText({ event: d.when, offset: d.offset });
+  const a = { id: d.id, name: d.name.trim(), enabled: d.enabled, type: d.type, time, days: d.days, target: d.target.length ? d.target : ['all'] };
   if (d.type === 'sunrise') Object.assign(a, { duration: d.duration, brightness: d.brightness, kelvin: d.kelvin });
   if (d.type === 'off') a.fade = d.fade;
   if (d.type === 'on') {
@@ -879,11 +891,72 @@ function draftToAlarm(d) {
   return a;
 }
 
+/** The next sunrise/sunset (event) plus offset minutes at the saved location, as ms; null without one */
+function nextSun(event, offset, from = Date.now()) {
+  const loc = S.settings.location;
+  if (!loc) return null;
+  for (let add = 0; add < 8; add++) {
+    const day = new Date(from);
+    day.setDate(day.getDate() + add);
+    const t = sunTimes(day, loc.lat, loc.lon)[event];
+    if (t != null && Math.round(t / 60000) * 60000 + offset * 60000 > from) return Math.round(t / 60000) * 60000 + offset * 60000;
+  }
+  return null;
+}
+
+/** When the draft's lights reach their look, as ms (any day for a clock time; the next one for a sun time) */
+function draftAt(d) {
+  if (d.when !== 'clock') return nextSun(d.when, d.offset);
+  if (!d.time) return null;
+  const [h, m] = d.time.split(':');
+  return new Date(2000, 0, 1, +h, +m).getTime();
+}
+
 function alarmSummary(d) {
-  if (!d.time) return '';
-  if (d.type === 'sunrise') return `Lights start glowing deep red at <b>${fmtHM(addMinutes(d.time, -d.duration))}</b> and reach full ${kelvinName(d.kelvin).toLowerCase()} white at <b>${fmtHM(d.time)}</b>.`;
-  if (d.type === 'off') return d.fade ? `Starts dimming at <b>${fmtHM(d.time)}</b>, lights are off at <b>${fmtHM(addMinutes(d.time, d.fade))}</b>.` : `Lights switch off at <b>${fmtHM(d.time)}</b>.`;
-  return `Lights turn on at <b>${fmtHM(d.time)}</b>.`;
+  const at = draftAt(d);
+  if (at == null) return '';
+  const t = (ms) => `<b>${fmtTime(ms)}</b>`;
+  const day = d.when === 'clock' ? '' : ` (${relDay(at, true)}: ${describeSunTime(sunTimeText({ event: d.when, offset: d.offset }))})`;
+  if (d.type === 'sunrise') return `Lights start glowing deep red at ${t(at - d.duration * 60000)} and reach full ${kelvinName(d.kelvin).toLowerCase()} white at ${t(at)}${day}.`;
+  if (d.type === 'off') return d.fade ? `Starts dimming at ${t(at)}, lights are off at ${t(at + d.fade * 60000)}${day}.` : `Lights switch off at ${t(at)}${day}.`;
+  return `Lights turn on at ${t(at)}${day}.`;
+}
+
+const OFFSETS = [-60, -30, -15, 0, 15, 30, 60];
+const offsetLabel = (m) => (!m ? 'Exactly' : `${Math.abs(m) % 60 ? `${Math.abs(m)} min` : `${Math.abs(m) / 60} h`} ${m < 0 ? 'before' : 'after'}`);
+
+/** Today's sunrise and sunset at a location, in words */
+function sunToday(loc) {
+  const s = sunTimes(new Date(), loc.lat, loc.lon);
+  if (s.polar) return s.polar === 'day' ? 'The sun stays up all day today' : 'The sun stays down all day today';
+  return `Today: sunrise ${fmtTime(s.sunrise)}, sunset ${fmtTime(s.sunset)}`;
+}
+
+const canLocate = () => window.isSecureContext && 'geolocation' in navigator;
+const locationForm = () => `<div class="input-row">
+    <input class="input" placeholder="e.g. 50.08, 14.43" data-input="location" value="${esc(ui.location)}" aria-label="Latitude and longitude" autocomplete="off">
+    <button class="btn primary" data-action="save-location">Save</button></div>
+  <p class="hint">In a map app, long-press your home to copy its coordinates. South and west are negative.${canLocate() ? ` <button class="link" data-action="locate">Use this device’s location</button>` : ''}</p>`;
+
+/** The "When" part of the alarm editor: a clock time, or when the sun rises or sets */
+function whenField(d) {
+  const kinds = [['clock', 'Clock time', 'clock'], ['sunrise', 'Sun rises', 'sunrise'], ['sunset', 'Sun sets', 'sunset']];
+  const loc = S.settings.location;
+  let body;
+  if (d.when === 'clock') {
+    body = `<input type="time" class="input time-input" value="${d.time}" data-input="draft" data-field="time" aria-label="${d.type === 'sunrise' ? 'Wake-up time' : 'Time'}" required>`;
+  } else {
+    const offsets = OFFSETS.includes(d.offset) ? OFFSETS : [...OFFSETS, d.offset].sort((x, y) => x - y);
+    const s = loc && sunTimes(new Date(), loc.lat, loc.lon);
+    body = `<div class="chips">${offsets.map((m) => chip('draft', `data-field="offset" data-value="${m}" data-num`, d.offset === m, offsetLabel(m))).join('')}</div>
+      ${!loc ? callout(`<b>Sun times need your location</b><p class="small-text muted">It’s only used to work out when the sun rises and sets, rounded to about 1 km.</p>${locationForm()}`)
+        : `<p class="hint">${s[d.when] ? `Today the sun ${d.when === 'sunrise' ? 'rises' : 'sets'} at ${fmtTime(s[d.when])} at your location.`
+          : `The sun doesn’t ${d.when === 'sunrise' ? 'rise' : 'set'} at your location today, so the alarm skips days like this.`}</p>`}`;
+  }
+  return `<div class="field">
+    <div class="segmented" role="group" aria-label="When">${kinds.map(([k, l, ic]) => `<button data-action="draft" data-field="when" data-value="${k}" aria-pressed="${d.when === k}">${icon(ic)}${l}</button>`).join('')}</div>
+    ${body}
+  </div>`;
 }
 
 const chip = (action, attrs, pressed, label) => `<button class="chip" data-action="${action}" ${attrs} aria-pressed="${!!pressed}">${label}</button>`;
@@ -892,6 +965,7 @@ const sceneChips = (field, value) => myScenes('all').length
 
 function sheetAlarm() {
   const d = ui.sheet.draft;
+  const at = draftAt(d);
   const days = [1, 2, 3, 4, 5, 6, 0];
   const presets = [['weekdays', 'Weekdays'], ['weekends', 'Weekends'], ['daily', 'Every day'], ['once', 'Once']];
   const daysKey = [...d.days].sort().join(',');
@@ -926,11 +1000,11 @@ function sheetAlarm() {
   return sheetFrame('Alarm', `
       <div class="grow"><h2>${d.id ? 'Edit alarm' : 'New alarm'}</h2><p>${esc(TYPE_INFO[d.type].label)}</p></div>${closeBtn()}`, `
       <div class="segmented" role="group" aria-label="Alarm type">${Object.entries(TYPE_INFO).map(([k, t]) => `<button data-action="draft" data-field="type" data-value="${k}" aria-pressed="${d.type === k}">${icon(t.icon)}${t.short}</button>`).join('')}</div>
+      ${whenField(d)}
       <div class="field">
-        <input type="time" class="input time-input" value="${d.time}" data-input="draft" data-field="time" aria-label="${d.type === 'sunrise' ? 'Wake-up time' : 'Time'}" required>
-        ${d.type === 'sunrise' && d.time ? `<div class="sunrise-preview" aria-hidden="true">
+        ${d.type === 'sunrise' && at != null ? `<div class="sunrise-preview" aria-hidden="true">
           <div class="sunrise-bar" style="background:${sunriseGradient(d.brightness, d.kelvin)}"></div>
-          <div class="sunrise-labels"><span>${fmtHM(addMinutes(d.time, -d.duration))}</span><span>${d.duration} min</span><span>${fmtHM(d.time)}</span></div></div>` : ''}
+          <div class="sunrise-labels"><span>${fmtTime(at - d.duration * 60000)}</span><span>${d.duration} min</span><span>${fmtTime(at)}</span></div></div>` : ''}
         <p class="hint" style="text-align:center">${alarmSummary(d)}</p>
       </div>
       <div class="field"><span class="field-label">Repeat</span>
@@ -1041,6 +1115,15 @@ function viewSettings() {
     </section>
 
     <section class="section">
+      <div class="section-head"><h2>Location</h2>${st.location ? `<button class="btn small ghost danger" data-action="remove-location">Remove</button>` : ''}</div>
+      <div class="panel">
+        ${st.location ? `<div class="slider-row">${icon('pin')}<span style="flex:1"><b>${st.location.lat}, ${st.location.lon}</b> <span class="muted">${esc(sunToday(st.location))}</span></span></div>`
+          : '<p class="muted small-text">For alarms at sunrise or sunset, like “30 minutes before sunset”. It’s rounded to about 1 km and only kept on this computer.</p>'}
+        ${locationForm()}
+      </div>
+    </section>
+
+    <section class="section">
       <div class="section-head"><h2>Lights</h2><button class="btn small ghost" data-action="refresh">${icon('refresh')}Scan again</button></div>
       ${st.lanError ? callout(`Local control is off: ${esc(st.lanError)}`, 'error') : ''}
       ${S.devices.length ? `<div class="list">${S.devices.map((d) => `<div class="list-row" data-key="s-${d.id}">
@@ -1074,7 +1157,8 @@ lights desk 40            <span class="c"># brightness</span>
 lights red / lights warm  <span class="c"># color or white</span>
 lights scene aurora       <span class="c"># any Govee scene</span>
 lights sleep 30           <span class="c"># fade out over 30 min</span>
-lights alarm add 7:00 sunrise weekdays
+lights alarm add 7:00 wake weekdays  <span class="c"># sunrise fade</span>
+lights alarm add sunset-30 on
 lights help               <span class="c"># everything else</span></pre>
     </section>`;
 }
@@ -1388,10 +1472,10 @@ const actions = {
   },
   async 'save-alarm'() {
     const d = draft();
-    if (!d.time) return toast('Pick a time', 'error');
+    if (d.when === 'clock' && !d.time) return toast('Pick a time', 'error');
     try {
-      await api('POST', '/api/alarms', draftToAlarm(d));
-      toast(d.id ? 'Alarm updated' : `Alarm set for ${fmtHM(d.time)}`);
+      const a = await api('POST', '/api/alarms', draftToAlarm(d));
+      toast(d.id ? 'Alarm updated' : `Alarm set ${d.when === 'clock' ? `for ${fmtHM(d.time)}` : describeSunTime(a.time)}`);
       closeSheet();
     } catch (e) { toast(e.message, 'error'); }
   },
@@ -1444,6 +1528,21 @@ const actions = {
     if (!confirm('Remove the API key? Lights with LAN Control keep working.')) return;
     await api('POST', '/api/settings', { apiKey: '' }).catch((e) => toast(e.message, 'error'));
   },
+  'save-location'() {
+    const loc = parseLatLon(ui.location);
+    if (!loc) return toast('Type latitude and longitude, like 50.08, 14.43', 'error');
+    saveLocation(loc);
+  },
+  locate() {
+    toast('Finding your location…');
+    navigator.geolocation.getCurrentPosition((p) => saveLocation({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      (e) => toast(`Couldn’t get the location: ${e.message}`, 'error'), { timeout: 15_000 });
+  },
+  async 'remove-location'() {
+    const n = S.alarms.filter((a) => a.enabled && parseSunTime(a.time)).length;
+    if (!confirm(n ? `Remove your location? ${n} alarm${n === 1 ? '' : 's'} at sunrise or sunset won’t run until you set it again.` : 'Remove your location?')) return;
+    await api('POST', '/api/settings', { location: null }).catch((e) => toast(e.message, 'error'));
+  },
   async refresh() {
     toast('Looking for lights…');
     await api('POST', '/api/refresh', { full: true }).catch((e) => toast(e.message, 'error'));
@@ -1458,6 +1557,16 @@ const actions = {
     await api('POST', `/api/devices/${encodeURIComponent(d.id)}`, { hidden: !d.hidden }).catch((e) => toast(e.message, 'error'));
   },
 };
+
+async function saveLocation(loc) {
+  try {
+    const r = await api('POST', '/api/settings', { location: loc });
+    ui.location = '';
+    S.settings.location = r.location;
+    toast(`Location saved — ${sunToday(r.location).replace(/^Today: /, 'today ')}`);
+    render();
+  } catch (e) { toast(e.message, 'error'); }
+}
 
 function sendMusic(ref) {
   const m = ui.music[ref];
@@ -1501,6 +1610,7 @@ const inputs = {
     setDraft({ [el.dataset.field]: v });
   },
   'api-key'(el) { ui.apiKey = el.value; },
+  location(el) { ui.location = el.value; },
 };
 
 function pickColor(ref, hex, updateHS = true) {
@@ -1563,6 +1673,7 @@ document.addEventListener('keydown', (e) => {
     setWheel(wheel, { h: (hs.h + step[0] + 360) % 360, s: clamp(hs.s + step[1], 0, 1) });
   }
   if (e.key === 'Enter' && e.target.dataset?.input === 'api-key') actions['save-key']();
+  if (e.key === 'Enter' && e.target.dataset?.input === 'location') actions['save-location']();
 });
 
 // Coming back to the tab: refresh states of cloud-only lights (throttled on the server)

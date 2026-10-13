@@ -11,7 +11,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 
 - **Local Wi-Fi (LAN) control**: on/off, brightness, color and white respond instantly and work without internet.
 - **Govee cloud API**: Govee scenes, DIY scenes and snapshots, music mode, per-segment colors, and lights that don't have LAN Control.
-- **Alarms**: sunrise wake-up (deep red → warm → bright white), turn on at a time, turn off with a fade-out, per weekday.
+- **Alarms**: sunrise fade to wake up (deep red → warm → bright white), turn on, turn off with a fade-out, per weekday. At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
 - **One-tap looks** (Bright, Relax, Focus, Movie, Night light) next to your own favorites, and a drag-to-pick **color wheel**.
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
 - **My scenes**: every scene you turn on is saved, so it's one tap away next time. *Edit* in the scene list deletes scenes you don't want, including Govee's own ones (only from this app; Govee keeps them, so they can be brought back).
@@ -62,8 +62,10 @@ lights red | lights warm       # color / white (also "#ff8800", 2700)
 lights scene aurora            # Govee scene
 lights fav cozy                # apply a favorite
 lights sleep 30                # fade out over 30 min, then off
-lights alarm add 6:45 sunrise weekdays --for 30
+lights alarm add 6:45 wake weekdays --for 30   # sunrise fade, done at 6:45
 lights alarm add 23:30 off daily --for 15 --lights bedroom
+lights alarm add sunset-30 on --fav cozy       # 30 min before the sun sets
+lights location 50.08 14.43    # where you are, for sunrise/sunset times
 lights alarms                  # list; lights alarm off|on|rm|test <n>
 lights group add bedroom lamp strip
 lights restart | logs          # server control
@@ -77,7 +79,9 @@ lights help                    # everything else
 
 **Anyone on your Wi-Fi can use it.** There's no login: the server listens on your local network so your phone can reach it, which means anyone on the same network can open the web app and control your lights. Requests from other websites and DNS-rebinding tricks are blocked, and the browser only ever sees the last 4 characters of your API key. **Don't port-forward 8420 or expose it to the internet.** For access away from home, use a VPN such as Tailscale: open the computer's Tailscale name (like `http://mymac.tail1234.ts.net:8420`) or its 100.x address.
 
-**Your data stays in `data/`.** Settings, alarms, groups, favorites, the API key and the log live in `data/lights.json` (file mode 600) and `data/server.log`. The folder is in `.gitignore`; never commit it.
+**Your data stays in `data/`.** Settings, alarms, groups, favorites, your location (rounded to about 1 km), the API key and the log live in `data/lights.json` (file mode 600) and `data/server.log`. The folder is in `.gitignore`; never commit it.
+
+**Alarms at sunrise or sunset** follow the real sun where you are: set your location in *Settings → Location* or with `lights location <latitude> <longitude>`, then pick *Sun rises* or *Sun sets* in the alarm, up to 4 hours before or after. The times are worked out on your computer (NOAA's formula, no internet needed) and change every day. Near the poles, days without a sunrise or sunset are skipped and logged. A *sunrise fade* is different: it's the wake-up fade from red to white, and it can end at any time, including at sunrise.
 
 **Cloud limits.** Govee allows 10,000 cloud requests per day per key and limits how fast each light can be changed. The app queues commands per light and prefers LAN when it can. Settings shows today's count.
 
@@ -137,9 +141,9 @@ lib/trial.js        "try" a look for a few seconds, then undo or keep
 lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
 lib/hosts.js        which host names the server answers to (blocks DNS rebinding)
-lib/util.js         colors, times and parsing, shared with the web app
+lib/util.js         colors, times, sunrise/sunset and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, light names, alarms and host names (npm test)
+test/               tests for colors, times, sun times, light names, alarms and host names (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

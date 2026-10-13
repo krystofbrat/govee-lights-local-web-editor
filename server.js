@@ -15,6 +15,7 @@ import { Scheduler } from './lib/scheduler.js';
 import { SceneLibrary } from './lib/library.js';
 import { Trial } from './lib/trial.js';
 import { hostAllowed, parseHostList } from './lib/hosts.js';
+import { parseLatLon } from './lib/util.js';
 
 const store = loadStore();
 const data = store.data;
@@ -67,6 +68,7 @@ function snapshot() {
       lanReady: lan.ready,
       lanError: lan.error,
       usage: data.usage.day === today() ? data.usage.count : 0,
+      location: data.location,
       port: PORT,
       urls: urls(),
     },
@@ -295,6 +297,15 @@ route('DELETE', '/api/devices/:id', (req, res, body, p) => {
 });
 
 route('POST', '/api/settings', async (req, res, body) => {
+  if (body.location !== undefined) {
+    const off = body.location === null || body.location === '' || body.location === 'off';
+    const loc = off ? null : parseLatLon(body.location);
+    if (!off && !loc) throw new UserError('Location must be latitude and longitude, like 50.08, 14.43');
+    data.location = loc;
+    store.save();
+    devices.changed();
+    if (body.apiKey === undefined) return { ok: true, location: loc };
+  }
   if (body.apiKey !== undefined) {
     const key = String(body.apiKey).trim();
     if (key) {

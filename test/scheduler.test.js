@@ -7,8 +7,8 @@ const MIN = 60_000;
 const DAILY = [0, 1, 2, 3, 4, 5, 6];
 
 /** A scheduler wired to fakes that record what it would do to the lights */
-function setup(alarms = []) {
-  const store = { data: { alarms, fired: {}, timers: [], groups: [] }, save() {} };
+function setup(alarms = [], location = null) {
+  const store = { data: { alarms, fired: {}, timers: [], groups: [], location }, save() {} };
   const fadesStarted = [], applied = [];
   const devices = {
     resolve: () => ['LAMP'],
@@ -111,4 +111,61 @@ test('alarms that are not due yet do nothing', () => {
   ]);
   scheduler.tick();
   assert.equal(fadesStarted.length + applied.length, 0);
+});
+
+// ---------- times at sunrise and sunset ----------
+
+const PRAGUE = { lat: 50.08, lon: 14.44 };
+// On 14 Jan 2026 the sun sets in Prague at 15:27 UTC
+const SUNSET_JAN_14 = Date.UTC(2026, 0, 14, 15, 27);
+
+test('a sun time needs a location, except to switch the alarm off', () => {
+  const { scheduler } = setup();
+  assert.throws(() => scheduler.upsert({ type: 'on', time: 'sunset' }), /location/);
+  assert.equal(scheduler.upsert({ type: 'on', time: 'sunset', enabled: false }).time, 'sunset');
+});
+
+test('sun times are saved in a standard form', () => {
+  const { scheduler } = setup([], PRAGUE);
+  assert.equal(scheduler.upsert({ type: 'on', time: 'Sunset - 30' }).time, 'sunset-30');
+  assert.equal(scheduler.upsert({ type: 'off', time: 'sunrise+15' }).time, 'sunrise+15');
+  assert.throws(() => scheduler.upsert({ type: 'on', time: 'sunset-600' }), UserError);
+});
+
+test('upcoming shows the real time of a sun alarm', () => {
+  const now = Date.UTC(2026, 0, 14, 6, 0);
+  const { scheduler } = setup([
+    alarm({ id: 'before', type: 'on', time: 'sunset-30' }),
+    alarm({ id: 'fade', type: 'sunrise', time: 'sunset', duration: 20 }),
+  ], PRAGUE);
+  assert.deepEqual(scheduler.upcoming(now), [
+    { id: 'before', at: SUNSET_JAN_14 - 30 * MIN, start: SUNSET_JAN_14 - 30 * MIN },
+    { id: 'fade', at: SUNSET_JAN_14, start: SUNSET_JAN_14 - 20 * MIN },
+  ]);
+});
+
+test('a sun alarm fires when its time comes, once', () => {
+  const { scheduler, applied } = setup([alarm({ type: 'off', time: 'sunset-30', fade: 0 })], PRAGUE);
+  scheduler.tick(SUNSET_JAN_14 - 31 * MIN);
+  assert.equal(applied.length, 0);
+  scheduler.tick(SUNSET_JAN_14 - 29 * MIN);
+  scheduler.tick(SUNSET_JAN_14 - 28 * MIN);
+  assert.deepEqual(applied, [{ ids: ['LAMP'], action: { power: false } }]);
+});
+
+test('days without a sunset are skipped and logged once', (t) => {
+  const logged = t.mock.method(console, 'log', () => {});
+  const a = alarm({ type: 'on', time: 'sunset' });
+  const { scheduler } = setup([a], { lat: 69.65, lon: 18.96 }); // Tromsø, polar night
+  const now = Date.UTC(2024, 11, 21, 12, 0);
+  assert.equal(scheduler.at(a, now, 0, { log: true }), null);
+  assert.equal(scheduler.at(a, now, 0, { log: true }), null);
+  assert.deepEqual(scheduler.upcoming(now), []);
+  assert.equal(logged.mock.callCount(), 1);
+  assert.match(logged.mock.calls[0].arguments[0], /polar night/);
+});
+
+test('without a location, sun alarms just don\'t come up', () => {
+  const { scheduler } = setup([alarm({ type: 'on', time: 'sunset' })]);
+  assert.deepEqual(scheduler.upcoming(Date.UTC(2026, 0, 14, 6, 0)), []);
 });

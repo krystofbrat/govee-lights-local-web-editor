@@ -60,6 +60,22 @@ test('an alarm needs a valid time', () => {
   assert.throws(() => scheduler.upsert({ type: 'on', time: 'soon' }), UserError);
 });
 
+test('some days can have their own time', () => {
+  const { scheduler } = setup();
+  const a = scheduler.upsert({ type: 'sunrise', time: '6:30', days: [1, 2, 3, 4, 5], times: { 1: '5:30am', 3: '05:30', 4: '06:30', 6: '09:00' } });
+  // Thursday is the usual time anyway, and the alarm doesn't run on Saturday
+  assert.deepEqual(a.times, { 1: '05:30', 3: '05:30' });
+  assert.deepEqual(scheduler.upsert({ id: a.id, enabled: false }).times, { 1: '05:30', 3: '05:30' });
+  assert.equal(scheduler.upsert({ id: a.id, times: {} }).times, undefined);
+  assert.throws(() => scheduler.upsert({ type: 'on', time: '07:00', days: [1], times: { 1: 'early' } }), /Mon/);
+});
+
+test('only repeating clock alarms have a time per day', () => {
+  const { scheduler } = setup([], { lat: 50.08, lon: 14.44 });
+  assert.equal(scheduler.upsert({ type: 'on', time: '07:00', days: [], times: { 1: '05:30' } }).times, undefined);
+  assert.equal(scheduler.upsert({ type: 'on', time: 'sunset', days: DAILY, times: { 1: '05:30' } }).times, undefined);
+});
+
 // ---------- upcoming ----------
 
 test('upcoming lists enabled alarms by when their lights start', () => {
@@ -76,6 +92,18 @@ test('upcoming lists enabled alarms by when their lights start', () => {
     { id: 'past', at: new Date(2026, 0, 15, 5, 0).getTime(), start: new Date(2026, 0, 15, 5, 0).getTime() },
     { id: 'once', at: new Date(2026, 0, 15, 5, 30).getTime(), start: new Date(2026, 0, 15, 5, 30).getTime() },
     { id: 'weekend', at: new Date(2026, 0, 17, 6, 45).getTime(), start: new Date(2026, 0, 17, 6, 45).getTime() },
+  ]);
+});
+
+test('upcoming uses the time of the day the alarm runs next', () => {
+  const now = new Date(2026, 0, 14, 6, 0).getTime(); // a Wednesday, 6:00
+  const { scheduler } = setup([
+    alarm({ id: 'later-today', type: 'on', time: '05:30', days: [1, 2, 3, 4, 5], times: { 3: '06:30' } }),
+    alarm({ id: 'early-tomorrow', type: 'on', time: '06:30', days: [1, 2, 3, 4, 5], times: { 3: '05:30', 4: '05:30' } }),
+  ]);
+  assert.deepEqual(scheduler.upcoming(now), [
+    { id: 'later-today', at: new Date(2026, 0, 14, 6, 30).getTime(), start: new Date(2026, 0, 14, 6, 30).getTime() },
+    { id: 'early-tomorrow', at: new Date(2026, 0, 15, 5, 30).getTime(), start: new Date(2026, 0, 15, 5, 30).getTime() },
   ]);
 });
 
@@ -101,6 +129,15 @@ test('a one-time alarm switches itself off after it fires', () => {
 test('a turn-off alarm a minute late still switches the lights off', () => {
   const { scheduler, applied } = setup([alarm({ type: 'off', time: hm(-1 * MIN), fade: 0 })]);
   scheduler.tick();
+  assert.deepEqual(applied, [{ ids: ['LAMP'], action: { power: false } }]);
+});
+
+test('on a day with its own time, the alarm fires then instead of at the usual time', () => {
+  const wednesday6 = new Date(2026, 0, 14, 6, 0).getTime();
+  const { scheduler, applied } = setup([alarm({ type: 'off', fade: 0, time: '06:00', times: { 3: '06:30' } })]);
+  scheduler.tick(wednesday6);
+  assert.equal(applied.length, 0);
+  scheduler.tick(wednesday6 + 30 * MIN);
   assert.deepEqual(applied, [{ ids: ['LAMP'], action: { power: false } }]);
 });
 

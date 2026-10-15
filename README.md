@@ -22,7 +22,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 
 - **Local Wi-Fi (LAN) control**: on/off, brightness, color and white respond instantly and work without internet.
 - **Govee cloud API**: Govee scenes, DIY scenes and snapshots, music mode, per-segment colors, and lights that don't have LAN Control.
-- **Alarms**: sunrise fade to wake up (deep red → warm → bright white), turn on, turn off with a fade-out, per weekday. At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
+- **Alarms**: sunrise fade to wake up (deep red → warm → bright white), turn on, turn off with a fade-out, per weekday, with its own time on some days if you like (5:30 on Monday, 6:30 the rest of the week). At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
 - **One-tap looks** (Bright, Relax, Focus, Movie, Night light) next to your own favorites, and a drag-to-pick **color wheel**.
 - **Dimmer than 1%**: 0.5%, 0.25% or 0.1% for a night light, below the lowest brightness Govee allows (see *Things to know*).
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
@@ -77,6 +77,7 @@ lights scene aurora            # Govee scene
 lights fav cozy                # apply a favorite
 lights sleep 30                # fade out over 30 min, then off
 lights alarm add 6:45 wake weekdays --for 30   # sunrise fade, done at 6:45
+lights alarm add 6:30 wake weekdays mon,wed=5:30   # 5:30 on Mon and Wed, 6:30 the other weekdays
 lights alarm add 23:30 off daily --for 15 --lights bedroom
 lights alarm add sunset-30 on --fav cozy       # 30 min before the sun sets
 lights location 50.08 14.43    # where you are, for sunrise/sunset times

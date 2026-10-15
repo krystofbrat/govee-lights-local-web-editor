@@ -1,5 +1,5 @@
 import {
-  COLORS, TEMPS, DAY_NAMES, DAY_SETS, clamp, kelvinToHex, hsvToHex, hexToHsv, hexToRgb, describeDays, sunriseFrame,
+  COLORS, TEMPS, DAY_NAMES, DAY_SETS, clamp, kelvinToHex, hsvToHex, hexToHsv, hexToRgb, describeDays, dayTimeGroups, sunriseFrame,
   parseSunTime, sunTimeText, describeSunTime, sunTimes, parseLatLon,
 } from '/shared/util.js';
 
@@ -822,6 +822,9 @@ function dayDots(days) {
 
 const smallAmPm = (text) => esc(text).replace(/\s*([AaPp]\.?\s?[Mm]\.?)$/, '<small>$1</small>');
 
+/** "Mon, Wed 5:30 AM · Tue, Thu, Fri 6:30 AM" for an alarm with a time per day */
+const dayTimesText = (a) => dayTimeGroups(a).map((g) => `${describeDays(g.days)} ${fmtHM(g.time)}`).join(' · ');
+
 function alarmCard(a) {
   const up = S.upcoming.find((u) => u.id === a.id);
   const sun = parseSunTime(a.time);
@@ -835,14 +838,15 @@ function alarmCard(a) {
     next = S.settings.location ? `No ${sun.event} here in the next week` : 'Needs your location (Settings)';
   }
   const sub = [a.target.map(targetName).join(', '), a.name ? alarmLine(a) : ''].filter(Boolean).join(' · ');
-  // Sun times show when they'll actually happen next, and what they follow
-  const time = sun ? (up ? fmtTime(up.at) : cap(sun.event)) : fmtHM(a.time);
+  // Sun times and times per day show when they'll actually happen next; sun times also what they follow
+  const time = sun ? (up ? fmtTime(up.at) : cap(sun.event)) : a.times && up ? fmtTime(up.at) : fmtHM(a.time);
   return `<article class="alarm ${a.enabled ? '' : 'disabled'}" data-key="a-${a.id}" style="--strip:${alarmStrip(a)}">
     <button class="alarm-main" data-action="edit-alarm" data-id="${a.id}">
       <span class="alarm-time">${smallAmPm(time)}</span>
       <span class="alarm-meta">
         ${sun ? `<span class="sun-when">${icon(sun.event)}${esc(cap(describeSunTime(a.time)))}</span>` : ''}
         <span class="type">${icon(TYPE_INFO[a.type].icon)}${esc(a.name || alarmLine(a))}</span>
+        ${a.times ? `<span class="day-times-text">${esc(dayTimesText(a))}</span>` : ''}
         <span class="sub">${dayDots(a.days)}<span class="sub-text">${esc(sub)}</span></span>
         ${next ? `<span class="next">${esc(next)}</span>` : ''}
       </span>
@@ -901,6 +905,7 @@ function viewAlarms() {
 function newAlarmDraft() {
   return {
     type: 'sunrise', time: '07:00', when: 'clock', offset: 0, days: [...DAY_SETS.weekdays], target: ['all'], name: '', enabled: true,
+    perDay: false, times: {},
     duration: 30, brightness: 100, kelvin: 4000, fade: 15,
     onMode: 'white', onBrightness: 80, onColor: COLORS.orange, onKelvin: 3000, onFavorite: S.favorites[0]?.id || '', onScene: '',
   };
@@ -910,6 +915,7 @@ function alarmToDraft(a) {
   const d = { ...newAlarmDraft(), ...structuredClone(a) };
   const sun = parseSunTime(a.time);
   if (sun) Object.assign(d, { when: sun.event, offset: sun.offset, time: '07:00' });
+  d.perDay = Object.keys(d.times).length > 0;
   const x = a.action || {};
   if (a.type === 'on') {
     d.onBrightness = x.brightness ?? 100;
@@ -922,9 +928,21 @@ function alarmToDraft(a) {
   return d;
 }
 
+/** Whether the draft gives each of its days its own clock time */
+const perDay = (d) => d.when === 'clock' && d.perDay && d.days.length > 0;
+/** The draft's clock time on weekday n */
+const dayTime = (d, n) => d.times[n] || d.time;
+
 function draftToAlarm(d) {
-  const time = d.when === 'clock' ? d.time : sunTimeText({ event: d.when, offset: d.offset });
-  const a = { id: d.id, name: d.name.trim(), enabled: d.enabled, type: d.type, time, days: d.days, target: d.target.length ? d.target : ['all'] };
+  let time = d.when === 'clock' ? d.time : sunTimeText({ event: d.when, offset: d.offset });
+  const times = {};
+  if (perDay(d)) {
+    // The time most days share is the alarm's time; the other days keep their own
+    const groups = dayTimeGroups(d);
+    time = groups.reduce((x, y) => (y.days.length > x.days.length || (y.days.length === x.days.length && y.time < x.time) ? y : x)).time;
+    for (const g of groups) if (g.time !== time) for (const n of g.days) times[n] = g.time;
+  }
+  const a = { id: d.id, name: d.name.trim(), enabled: d.enabled, type: d.type, time, times, days: d.days, target: d.target.length ? d.target : ['all'] };
   if (d.type === 'sunrise') Object.assign(a, { duration: d.duration, brightness: d.brightness, kelvin: d.kelvin });
   if (d.type === 'off') a.fade = d.fade;
   if (d.type === 'on') {
@@ -950,9 +968,24 @@ function nextSun(event, offset, from = Date.now()) {
   return null;
 }
 
-/** When the draft's lights reach their look, as ms (any day for a clock time; the next one for a sun time) */
+/** The next time the draft runs, as ms, when its days have their own times */
+function nextDayTime(d, from = Date.now()) {
+  for (let add = 0; add < 8; add++) {
+    const day = new Date(from);
+    day.setDate(day.getDate() + add);
+    const hm = d.days.includes(day.getDay()) && dayTime(d, day.getDay());
+    if (!hm) continue;
+    const [h, m] = hm.split(':');
+    day.setHours(+h, +m, 0, 0);
+    if (day.getTime() > from) return day.getTime();
+  }
+  return null;
+}
+
+/** When the draft's lights reach their look, as ms (any day for a clock time; the next one for a sun time or a time per day) */
 function draftAt(d) {
   if (d.when !== 'clock') return nextSun(d.when, d.offset);
+  if (perDay(d)) return nextDayTime(d);
   if (!d.time) return null;
   const [h, m] = d.time.split(':');
   return new Date(2000, 0, 1, +h, +m).getTime();
@@ -962,7 +995,8 @@ function alarmSummary(d) {
   const at = draftAt(d);
   if (at == null) return '';
   const t = (ms) => `<b>${fmtTime(ms)}</b>`;
-  const day = d.when === 'clock' ? '' : ` (${relDay(at, true)}: ${describeSunTime(sunTimeText({ event: d.when, offset: d.offset }))})`;
+  const day = d.when !== 'clock' ? ` (${relDay(at, true)}: ${describeSunTime(sunTimeText({ event: d.when, offset: d.offset }))})`
+    : perDay(d) ? ` (next: ${relDay(at, true)})` : '';
   if (d.type === 'sunrise') return `Lights start glowing deep red at ${t(at - d.duration * 60000)} and reach full ${kelvinName(d.kelvin).toLowerCase()} white at ${t(at)}${day}.`;
   if (d.type === 'off') return d.fade ? `Starts dimming at ${t(at)}, lights are off at ${t(at + d.fade * 60000)}${day}.` : `Lights switch off at ${t(at)}${day}.`;
   return `Lights turn on at ${t(at)}${day}.`;
@@ -990,7 +1024,12 @@ function whenField(d) {
   const loc = S.settings.location;
   let body;
   if (d.when === 'clock') {
-    body = `<input type="time" class="input time-input" value="${d.time}" data-input="draft" data-field="time" aria-label="${d.type === 'sunrise' ? 'Wake-up time' : 'Time'}" required>`;
+    const label = d.type === 'sunrise' ? 'Wake-up time' : 'Time';
+    body = perDay(d)
+      ? `<div class="day-times">${[1, 2, 3, 4, 5, 6, 0].filter((n) => d.days.includes(n)).map((n) => `<label class="day-time"><span>${DAY_NAMES[n]}</span>
+          <input type="time" class="input" value="${dayTime(d, n)}" data-input="draft-time" data-day="${n}" aria-label="${label} on ${DAY_NAMES[n]}" required></label>`).join('')}</div>`
+      : `<input type="time" class="input time-input" value="${d.time}" data-input="draft" data-field="time" aria-label="${label}" required>`;
+    if (d.days.length) body += `<div class="slider-row"><span style="flex:1">Different time on some days</span>${smallSwitch('draft-per-day', '', d.perDay, 'Different time on some days')}</div>`;
   } else {
     const offsets = OFFSETS.includes(d.offset) ? OFFSETS : [...OFFSETS, d.offset].sort((x, y) => x - y);
     const s = loc && sunTimes(new Date(), loc.lat, loc.lon);
@@ -1549,6 +1588,7 @@ const actions = {
     setDraft({ days: d.days.includes(n) ? d.days.filter((x) => x !== n) : [...d.days, n] });
   },
   'draft-days'(el) { setDraft({ days: el.dataset.set === 'once' ? [] : [...DAY_SETS[el.dataset.set]] }); },
+  'draft-per-day'() { setDraft({ perDay: !draft().perDay }); },
   'draft-target'(el) {
     const ref = el.dataset.target, d = draft();
     let t = d.target.includes(ref) ? d.target.filter((x) => x !== ref) : [...d.target.filter((x) => (ref === 'all' ? false : x !== 'all')), ref];
@@ -1560,10 +1600,10 @@ const actions = {
   },
   async 'save-alarm'() {
     const d = draft();
-    if (d.when === 'clock' && !d.time) return toast('Pick a time', 'error');
+    if (d.when === 'clock' && (perDay(d) ? d.days.some((n) => !dayTime(d, n)) : !d.time)) return toast('Pick a time', 'error');
     try {
       const a = await api('POST', '/api/alarms', draftToAlarm(d));
-      toast(d.id ? 'Alarm updated' : `Alarm set ${d.when === 'clock' ? `for ${fmtHM(d.time)}` : describeSunTime(a.time)}`);
+      toast(d.id ? 'Alarm updated' : `Alarm set ${d.when !== 'clock' ? describeSunTime(a.time) : `for ${a.times ? dayTimesText(a) : fmtHM(a.time)}`}`);
       closeSheet();
     } catch (e) { toast(e.message, 'error'); }
   },
@@ -1734,6 +1774,7 @@ const inputs = {
     const v = el.hasAttribute('data-num') ? +el.value : el.value;
     setDraft({ [el.dataset.field]: v });
   },
+  'draft-time'(el) { setDraft({ times: { ...draft().times, [el.dataset.day]: el.value } }); },
   'api-key'(el) { ui.apiKey = el.value; },
   location(el) { ui.location = el.value; },
   'pin-entry'(el) { ui.pinEntry = el.value; },

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseColor, parseKelvin, parseTime, describeDays, kelvinToRgb, hsvToHex, hexToHsv, mixHex, sunriseFrame, scaleHex,
+  parseColor, parseKelvin, parseTime, describeDays, dayTimeGroups, kelvinToRgb, hsvToHex, hexToHsv, mixHex, sunriseFrame, scaleHex,
 } from '../lib/util.js';
 
 test('parseColor accepts names, hex and r,g,b', () => {
@@ -42,6 +42,14 @@ test('describeDays names common sets and lists the rest Monday first', () => {
   assert.equal(describeDays([5, 1, 2, 3, 4]), 'Weekdays');
   assert.equal(describeDays([6, 0]), 'Weekends');
   assert.equal(describeDays([0, 1, 3]), 'Mon, Wed, Sun');
+});
+
+test('dayTimeGroups groups the days of an alarm by their time, Monday first', () => {
+  assert.deepEqual(dayTimeGroups({ days: [0, 1, 2, 3], time: '06:30', times: { 1: '05:30', 3: '05:30' } }), [
+    { time: '05:30', days: [1, 3] },
+    { time: '06:30', days: [2, 0] },
+  ]);
+  assert.deepEqual(dayTimeGroups({ days: [1, 2], time: '07:00' }), [{ time: '07:00', days: [1, 2] }]);
 });
 
 test('kelvinToRgb goes from orange to bluish white', () => {

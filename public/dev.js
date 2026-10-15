@@ -475,7 +475,7 @@ const ROUTE_INFO = {
   'GET /api/scenes': ['Scenes the target can show, with Govee’s pictures. Add &force=1 to skip the 6-hour cache.'],
   'POST /api/timers': ['Sleep timer: fade out over the minutes, then off.', { target: 'all', minutes: 30, fade: true }],
   'DELETE /api/timers/:id': ['Cancel a sleep timer.'],
-  'POST /api/alarms': ['Create an alarm, or change one by including its id.', { name: 'Wake up', type: 'sunrise', time: '07:00', days: [1, 2, 3, 4, 5], target: ['all'], duration: 30 }],
+  'POST /api/alarms': ['Create an alarm, or change one by including its id. times gives some days their own clock time.', { name: 'Wake up', type: 'sunrise', time: '06:30', times: { 1: '05:30', 3: '05:30' }, days: [1, 2, 3, 4, 5], target: ['all'], duration: 30 }],
   'POST /api/alarms/preview': ['Play an alarm now, sped up: a sunrise takes 30 seconds.', { type: 'sunrise', time: '07:00', target: ['all'] }],
   'DELETE /api/alarms/:id': ['Delete an alarm.'],
   'POST /api/groups': ['Create a group, or change one by including its id.', { name: 'Bedroom', devices: [] }],

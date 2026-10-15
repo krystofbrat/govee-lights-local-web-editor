@@ -451,6 +451,9 @@ button.hero-meta:hover { color: var(--text); }
 .input-row .input { flex: 1; min-width: 0; }
 select.input { appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: right 18px top 19px, right 13px top 19px; background-size: 5px 5px; background-repeat: no-repeat; }
 .time-input { font-size: 44px; font-weight: 700; letter-spacing: -.02em; text-align: center; min-height: 72px; font-variant-numeric: tabular-nums; }
+.day-times { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.day-time { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 650; color: var(--muted); }
+.day-time .input { font-size: 20px; font-weight: 700; color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ---------- scenes ---------- */
 .scene-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
@@ -559,6 +562,7 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 36px; 
 .day-dots span.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
 .day-dots.once { font-size: 12px; font-weight: 700; color: var(--muted); }
 .alarm-meta .next { color: var(--accent); font-size: 13px; font-weight: 600; }
+.alarm-meta .day-times-text { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .alarm-main { flex-direction: column; align-items: flex-start; gap: 8px; } .alarm-time { font-size: 32px; } }
 
 .next-alarm {

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ROOT, DATA_DIR, LOG_FILE, configuredPort } from '../lib/store.js';
 import {
-  COLORS, TEMPS, DAY_SETS, DAY_NAMES, sleep, parseColor, parseKelvin, describeDays, hexToRgb, kelvinToHex,
-  parseAlarmTime, parseSunTime, describeSunTime, sunTimes, parseLatLon,
+  COLORS, TEMPS, DAY_SETS, DAY_NAMES, sleep, parseColor, parseKelvin, describeDays, dayTimeGroups, hexToRgb, kelvinToHex,
+  parseTime, parseAlarmTime, parseSunTime, describeSunTime, sunTimes, parseLatLon,
 } from '../lib/util.js';
 import { isValueWord, valueAction as parseValue } from '../lib/commands.js';
 import { serviceEnv, servicePlist } from '../lib/service.js';
@@ -52,9 +52,11 @@ ${bold('lights')} — control your Govee lights from the terminal
       wake     sunrise fade: glows from red to white, done at <when> ${dim('(the default)')}
       on, off  turn on, or turn off ${dim('(with --for: fade out)')}
       days     weekdays | weekends | daily | once | mon,wed,fri   ${dim('(default daily)')}
+               mon,wed=5:30   ${dim('those days at their own time')}
       options  --lights <name>  --name <label>  --for <min> ${dim('(sunrise fade length / fade-out)')}
                --brightness <n>  --color <c>  --temp <k>  --fav <favorite>  --scene <scene>
       ${dim('lights alarm add 6:45 wake weekdays --for 30')}
+      ${dim('lights alarm add 6:30 wake weekdays mon,wed=5:30')}
       ${dim('lights alarm add 23:30 off daily --for 15 --lights bedroom')}
       ${dim('lights alarm add sunset-30 on --lights desk --fav "cozy"')}
   lights alarm on | off | rm | test ${dim('<number|name>')}
@@ -216,6 +218,9 @@ function alarmLabel(a) {
 
 /** "at 07:00" or "30 min before sunset" */
 const whenText = (time) => (parseSunTime(time) ? describeSunTime(time) : `at ${time}`);
+
+/** The days of an alarm that run at their own time: [{ time, days }] */
+const ownTimes = (a) => dayTimeGroups(a).filter((g) => g.time !== a.time);
 
 // ---------- commands ----------
 
@@ -413,6 +418,7 @@ function listAlarms(S) {
     const dot = a.enabled ? green('●') : dim('○');
     const time = a.enabled ? bold(pad(a.time, width)) : dim(pad(a.time, width));
     console.log(`  ${dim(String(n + 1).padStart(2))}  ${dot} ${time}  ${pad(alarmLabel(a), 24)} ${pad(describeDays(a.days), 14)} ${pad(a.target.map((r) => refName(S, r)).join(', '), 16)} ${next}`);
+    for (const g of ownTimes(a)) console.log(`        ${dim(`${pad(g.time, width)}  ${describeDays(g.days)}`)}`);
   });
   console.log(dim(`\n  lights alarm on|off|rm|test <number>`));
   console.log();
@@ -447,17 +453,29 @@ function parseAlarmArgs(S, rest) {
   if (!time) throw new CliError('Usage: lights alarm add <when> [wake|on|off] [days] — when: 7:00, 6:30am, sunset, sunrise+15, sunset-30');
   let type = 'sunrise';
   let days = [...DAY_SETS.daily];
+  const times = {};
   for (const w of pos) {
     const l = w.toLowerCase();
+    const own = l.match(/^(.+)=(.+)$/); // mon,wed=5:30 or weekends=9:00
+    const ownDays = own && (DAY_SETS[own[1]] || parseDays(own[1]));
+    if (own) {
+      if (!ownDays || !parseTime(own[2])) throw new CliError(`Don't understand "${w}" — try mon,wed=5:30`);
+      for (const d of ownDays) times[d] = parseTime(own[2]);
+    }
     // After the time, "sunrise" still means the sunrise fade, as it always has
-    if (['sunrise', 'wake', 'wakeup', 'on', 'off', 'sleep'].includes(l)) type = { wake: 'sunrise', wakeup: 'sunrise', sleep: 'off' }[l] || l;
+    else if (['sunrise', 'wake', 'wakeup', 'on', 'off', 'sleep'].includes(l)) type = { wake: 'sunrise', wakeup: 'sunrise', sleep: 'off' }[l] || l;
     else if (l === 'everyday') days = [...DAY_SETS.daily];
     else if (DAY_SETS[l]) days = [...DAY_SETS[l]];
     else if (l === 'once') days = [];
     else if (parseDays(l)) days = parseDays(l);
     else throw new CliError(`Don't understand "${w}"`);
   }
-  const a = { type, time, days, name: opts.name || '', target: [toRef(S, opts.lights)] };
+  if (Object.keys(times).length) {
+    if (parseSunTime(time)) throw new CliError('Only clock times can differ by day, like: lights alarm add 6:30 wake weekdays mon,wed=5:30');
+    // Days given their own time run too
+    days = [...new Set([...days, ...Object.keys(times).map(Number)])];
+  }
+  const a = { type, time, times, days, name: opts.name || '', target: [toRef(S, opts.lights)] };
   if (type === 'sunrise') Object.assign(a, { duration: +(opts.for || 30), brightness: +(opts.brightness || 100), kelvin: parseKelvin(opts.temp) || 4000 });
   else if (type === 'off') a.fade = +(opts.for || 0);
   else a.action = { brightness: +(opts.brightness || 100), color: opts.color, kelvin: opts.temp, favorite: opts.fav, scene: opts.scene };
@@ -477,7 +495,8 @@ async function alarm(S, rest) {
     const a = await request('POST', '/api/alarms', draft);
     const after = await request('GET', '/api/state');
     const up = after.upcoming.find((u) => u.id === a.id);
-    console.log(`${green('✓')} ${alarmLabel(a)} ${whenText(a.time)}, ${describeDays(a.days).toLowerCase()}${up ? dim(` — next ${relDay(up.at)} ${fmtTime(up.at)}`) : ''}`);
+    const own = ownTimes(a).map((g) => `; ${describeDays(g.days)} at ${g.time}`).join('');
+    console.log(`${green('✓')} ${alarmLabel(a)} ${whenText(a.time)}, ${describeDays(a.days).toLowerCase()}${own}${up ? dim(` — next ${relDay(up.at)} ${fmtTime(up.at)}`) : ''}`);
     if (!serviceInstalled()) console.log(dim(`  Tip: run "lights service install" so alarms fire even after a restart.`));
     return;
   }

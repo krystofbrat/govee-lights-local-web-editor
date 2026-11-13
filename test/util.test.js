@@ -89,6 +89,15 @@ test('sunriseFrame starts dim deep red and ends at the chosen brightness and whi
   }
 });
 
+test('sunriseFrame starts its white at the warmest the light can do, without a jump in color', () => {
+  // A light whose whites only go down to 2700K: the color part leads into 2700K's color, then 2700K takes over
+  assert.equal(sunriseFrame(0.3 - 1e-9, 20, 3000, 2700).color, '#ffa757');
+  assert.deepEqual(sunriseFrame(0.3, 20, 3000, 2700), { brightness: 3, kelvin: 2700 });
+  for (let t = 0.3; t <= 1; t += 0.05) assert.ok(sunriseFrame(t, 20, 3000, 2700).kelvin >= 2700, `t=${t.toFixed(2)}`);
+  // Asked for a warmer white than it has: it ends at its warmest
+  assert.deepEqual(sunriseFrame(1, 60, 2000, 2700), { brightness: 60, kelvin: 2700 });
+});
+
 test('scaleHex darkens a color and keeps its hue, but never to black', () => {
   assert.equal(scaleHex('#ffa757', 0.25), '#402a16');
   assert.equal(scaleHex('#ff0000', 0.1), '#1a0000');

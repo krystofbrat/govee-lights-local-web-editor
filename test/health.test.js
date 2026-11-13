@@ -24,14 +24,14 @@ test('an error from Govee counts as failed, even with an answer', () => {
 test('wi-fi scans and the lights that answered them', () => {
   const h = new Health();
   const t0 = Date.now();
-  h.lan({ dir: 'out', cmd: 'scan', data: { interfaces: ['192.168.0.145'] } }, t0);
-  h.lan({ dir: 'in', cmd: 'scan', ip: '192.168.0.50' }, t0 + 100);
-  h.lan({ dir: 'in', cmd: 'scan', ip: '192.168.0.51' }, t0 + 120);
-  h.lan({ dir: 'out', cmd: 'devStatus', ip: '192.168.0.50' }, t0 + 200); // not a scan
+  h.lan({ dir: 'out', cmd: 'scan', data: { interfaces: ['192.168.1.20'] } }, t0);
+  h.lan({ dir: 'in', cmd: 'scan', ip: '192.168.1.50' }, t0 + 100);
+  h.lan({ dir: 'in', cmd: 'scan', ip: '192.168.1.51' }, t0 + 120);
+  h.lan({ dir: 'out', cmd: 'devStatus', ip: '192.168.1.50' }, t0 + 200); // not a scan
   const v = h.view(t0 + MIN);
-  assert.deepEqual(v.hour.lan, { scans: 1, answers: 2, from: ['192.168.0.50', '192.168.0.51'] });
-  assert.deepEqual(v.lastScan.interfaces, ['192.168.0.145']);
-  assert.equal(v.lastAnswer.ip, '192.168.0.51');
+  assert.deepEqual(v.hour.lan, { scans: 1, answers: 2, from: ['192.168.1.50', '192.168.1.51'] });
+  assert.deepEqual(v.lastScan.interfaces, ['192.168.1.20']);
+  assert.equal(v.lastAnswer.ip, '192.168.1.51');
 });
 
 test('the last hour and the last day are counted apart, and older ones are dropped', () => {

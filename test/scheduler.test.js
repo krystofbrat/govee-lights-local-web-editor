@@ -6,20 +6,32 @@ import { UserError } from '../lib/devices.js';
 const MIN = 60_000;
 const DAILY = [0, 1, 2, 3, 4, 5, 6];
 
-/** A scheduler wired to fakes that record what it would do to the lights */
-function setup(alarms = [], location = null) {
+/**
+ * A scheduler wired to fakes that record what it would do to the lights, and what it told the user.
+ * results: what turning the lights on/off returns; down: lights that don't answer; battery: the Mac is on battery.
+ */
+function setup(alarms = [], location = null, { results = [], down = [], battery = false } = {}) {
   const store = { data: { alarms, fired: {}, timers: [], groups: [], location }, save() {} };
-  const fadesStarted = [], applied = [];
+  const fadesStarted = [], applied = [], notes = [];
   const devices = {
     resolve: () => ['LAMP'],
     normalizeAction: (a) => a,
-    apply: async (ids, action) => { applied.push({ ids, action }); return []; },
+    apply: async (ids, action) => { applied.push({ ids, action }); return results; },
     changed() {},
+    get: (id) => ({ id }),
+    nameOf: (d) => (d.id === 'LAMP' ? 'Lamp' : d.id),
+    reachable: (d) => !down.includes(d.id),
+    lanActive: () => false,
+    cloudOffline: false,
   };
   const fades = { start: (job) => fadesStarted.push(job), cancel() {} };
-  const scheduler = new Scheduler({ store, devices, fades, notify() {} });
-  return { scheduler, store, fadesStarted, applied };
+  const notify = (msg, { important = false } = {}) => notes.push({ msg, important });
+  const scheduler = new Scheduler({ store, devices, fades, notify, system: { onBattery: async () => battery } });
+  return { scheduler, store, fadesStarted, applied, notes };
 }
+
+const settle = () => new Promise((r) => setImmediate(r));
+const important = (notes) => notes.filter((n) => n.important).map((n) => n.msg);
 
 const alarm = (props) => ({
   id: 'a1', name: '', enabled: true, type: 'sunrise', time: '07:00', days: DAILY, target: ['all'],
@@ -205,4 +217,118 @@ test('days without a sunset are skipped and logged once', (t) => {
 test('without a location, sun alarms just don\'t come up', () => {
   const { scheduler } = setup([alarm({ type: 'on', time: 'sunset' })]);
   assert.deepEqual(scheduler.upcoming(Date.UTC(2026, 0, 14, 6, 0)), []);
+});
+
+// ---------- how alarms went, and why they may not run ----------
+
+const NO_INTERNET = "Can't reach Govee's cloud — is this Mac online?";
+const SAVED = () => ({ updatedAt: Date.now() - 3600_000 }); // saved an hour ago, so yesterday's run doesn't count
+
+test('how a turn-off alarm went is kept, and a light it did not reach is reported', async () => {
+  const fine = setup([alarm({ type: 'off', time: hm(-1 * MIN), fade: 0, ...SAVED() })], null, { results: [{ id: 'LAMP', ok: true }] });
+  fine.scheduler.tick();
+  await settle();
+  assert.equal(fine.store.data.runs.a1.ok, true);
+  assert.equal(fine.store.data.runs.a1.lights, 1);
+  assert.deepEqual(important(fine.notes), []);
+
+  const bad = setup([alarm({ type: 'off', time: hm(-1 * MIN), fade: 0, ...SAVED() })], null, { results: [{ id: 'LAMP', ok: false, error: NO_INTERNET }] });
+  bad.scheduler.tick();
+  await settle();
+  assert.equal(bad.store.data.runs.a1.ok, false);
+  assert.deepEqual(bad.store.data.runs.a1.failed, [{ name: 'Lamp', error: NO_INTERNET }]);
+  assert.equal(important(bad.notes).length, 1);
+  assert.match(important(bad.notes)[0], /didn't reach your lights: Can't reach Govee's cloud/);
+});
+
+test('a sunrise is "running" until its fade ends, then says how it went; a preview is not kept', () => {
+  const { scheduler, store, fadesStarted, notes } = setup([alarm({ time: hm(10 * MIN), duration: 30, ...SAVED() })]);
+  scheduler.tick();
+  assert.equal(store.data.runs.a1.running, true);
+  fadesStarted[0].onEnd(false, { errors: new Map([['LAMP', NO_INTERNET]]) });
+  assert.equal(store.data.runs.a1.running, undefined);
+  assert.equal(store.data.runs.a1.ok, false);
+  assert.equal(important(notes).length, 1);
+
+  scheduler.preview({ type: 'sunrise', time: '07:00', days: DAILY });
+  assert.equal(fadesStarted[1].onEnd, undefined);
+});
+
+test('an alarm missed while the Mac was asleep is reported once', () => {
+  const at = new Date(2026, 0, 14, 7, 0).getTime();
+  const { scheduler, store, notes, fadesStarted } = setup([alarm({ time: '07:00', duration: 30 })]);
+  store.data.fired.a1 = new Date(2026, 0, 13, 7, 0).toISOString(); // yesterday's ran
+  scheduler.startedAt = at - 10 * 3600_000; // running since last night
+  scheduler.tick(at + 20 * MIN); // the Mac wakes up at 7:20, after the sunrise would have ended
+  assert.equal(fadesStarted.length, 0);
+  assert.deepEqual(store.data.runs.a1, { at, ranAt: store.data.runs.a1.ranAt, ok: false, missed: 'asleep', error: 'Your Mac was asleep (on battery or with the lid closed)' });
+  scheduler.tick(at + 25 * MIN);
+  assert.equal(important(notes).length, 1);
+  assert.match(important(notes)[0], /^Missed: Sunrise today at /);
+});
+
+test('an alarm missed before the server started says so', () => {
+  const at = new Date(2026, 0, 14, 7, 0).getTime();
+  const { scheduler, store } = setup([alarm({ time: '07:00', duration: 30 })]);
+  store.data.fired.a1 = new Date(2026, 0, 13, 7, 0).toISOString();
+  scheduler.startedAt = at + 10 * MIN;
+  scheduler.tick(at + 20 * MIN);
+  assert.equal(store.data.runs.a1.missed, 'server');
+});
+
+test('an alarm that ran is not reported as missed afterwards', () => {
+  const at = new Date(2026, 0, 14, 7, 0).getTime();
+  const { scheduler, store, notes } = setup([alarm({ time: '07:00', duration: 30 })]);
+  store.data.fired.a1 = new Date(2026, 0, 13, 7, 0).toISOString();
+  scheduler.startedAt = at - 10 * 3600_000;
+  scheduler.tick(at - 29 * MIN); // the sunrise starts
+  scheduler.tick(at + 3 * 3600_000);
+  assert.equal(store.data.runs.a1.running, true);
+  assert.deepEqual(important(notes), []);
+});
+
+test('an alarm coming up warns while the Mac is on battery, and notifies once that has lasted', async () => {
+  const now = Date.now();
+  const { scheduler, notes } = setup([alarm({ time: hm(3 * 3600_000), duration: 30 })], null, { battery: true });
+  await scheduler.check(now);
+  assert.equal(scheduler.risks.a1[0].reason, 'battery');
+  assert.deepEqual(important(notes), []); // a quick unplug doesn't send anything
+  await scheduler.check(now + 6 * MIN);
+  await scheduler.check(now + 12 * MIN);
+  assert.equal(important(notes).length, 1);
+  assert.match(important(notes)[0], /may not run\. Your Mac is on battery/);
+});
+
+test('lights that do not answer are a warning, but only for alarms in the next 10 hours', async () => {
+  const { scheduler } = setup([
+    alarm({ time: hm(3 * 3600_000), duration: 30 }),
+    alarm({ id: 'a2', time: hm(14 * 3600_000), duration: 30 }),
+  ], null, { down: ['LAMP'] });
+  await scheduler.check();
+  assert.equal(scheduler.risks.a1[0].reason, 'lights');
+  assert.match(scheduler.risks.a1[0].text, /None of its lights are answering/);
+  assert.equal(scheduler.risks.a2, undefined);
+});
+
+test('no warnings when the Mac is plugged in and the lights answer', async () => {
+  const { scheduler } = setup([alarm({ time: hm(3 * 3600_000), duration: 30 })]);
+  await scheduler.check();
+  assert.deepEqual(scheduler.risks, {});
+});
+
+test('after a long sleep only the latest missed run is reported', () => {
+  const at = new Date(2026, 0, 14, 7, 0).getTime();
+  const { scheduler, store, notes } = setup([alarm({ time: '07:00', duration: 30 })]);
+  store.data.fired.a1 = new Date(2026, 0, 11, 7, 0).toISOString(); // last ran three days ago
+  scheduler.startedAt = at - 5 * 24 * 3600_000;
+  scheduler.tick(at + 20 * MIN);
+  assert.equal(store.data.runs.a1.at, at);
+  assert.equal(important(notes).length, 1);
+});
+
+test('an alarm whose lights are gone is a warning', async () => {
+  const { scheduler } = setup([alarm({ time: hm(3 * 3600_000), duration: 30, target: ['group:gone'] })]);
+  scheduler.devices.resolve = () => [];
+  await scheduler.check();
+  assert.equal(scheduler.risks.a1[0].reason, 'nolights');
 });

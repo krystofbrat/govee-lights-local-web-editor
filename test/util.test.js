@@ -91,11 +91,29 @@ test('sunriseFrame starts dim deep red and ends at the chosen brightness and whi
 
 test('sunriseFrame starts its white at the warmest the light can do, without a jump in color', () => {
   // A light whose whites only go down to 2700K: the color part leads into 2700K's color, then 2700K takes over
-  assert.equal(sunriseFrame(0.3 - 1e-9, 20, 3000, 2700).color, '#ffa757');
-  assert.deepEqual(sunriseFrame(0.3, 20, 3000, 2700), { brightness: 3, kelvin: 2700 });
-  for (let t = 0.3; t <= 1; t += 0.05) assert.ok(sunriseFrame(t, 20, 3000, 2700).kelvin >= 2700, `t=${t.toFixed(2)}`);
+  const k2700 = { minKelvin: 2700 };
+  assert.equal(sunriseFrame(0.3 - 1e-9, 20, 3000, k2700).color, '#ffa757');
+  assert.deepEqual(sunriseFrame(0.3, 20, 3000, k2700), { brightness: 3, kelvin: 2700 });
+  for (let t = 0.3; t <= 1; t += 0.05) assert.ok(sunriseFrame(t, 20, 3000, k2700).kelvin >= 2700, `t=${t.toFixed(2)}`);
   // Asked for a warmer white than it has: it ends at its warmest
-  assert.deepEqual(sunriseFrame(1, 60, 2000, 2700), { brightness: 60, kelvin: 2700 });
+  assert.deepEqual(sunriseFrame(1, 60, 2000, k2700), { brightness: 60, kelvin: 2700 });
+});
+
+test('sunriseFrame can start below 1%, then goes on as before', () => {
+  const from = { from: 0.1 };
+  assert.deepEqual(sunriseFrame(0, 20, 3000, from), { brightness: 1, dim: 0.1, color: '#ff1e00' });
+  // Gets brighter all the way: below 1% by dim, then by brightness
+  let last = 0;
+  for (let t = 0; t <= 1.0001; t += 0.01) {
+    const f = sunriseFrame(Math.min(t, 1), 20, 3000, from);
+    const level = f.dim ? f.dim : f.brightness;
+    assert.ok(level >= last, `t=${t.toFixed(2)}: ${level} after ${last}`);
+    assert.ok(!f.dim || f.brightness === 1);
+    last = level;
+  }
+  assert.deepEqual(sunriseFrame(1, 20, 3000, from), { brightness: 20, kelvin: 3000 });
+  // Starting at 1% (lights without color LEDs, and the default) never goes below it
+  assert.equal(sunriseFrame(0, 20, 3000).dim, undefined);
 });
 
 test('scaleHex darkens a color and keeps its hue, but never to black', () => {

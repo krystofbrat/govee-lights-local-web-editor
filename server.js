@@ -18,6 +18,7 @@ import { hostAllowed, parseHostList, fromThisComputer } from './lib/hosts.js';
 import { Pin } from './lib/auth.js';
 import { parseLatLon } from './lib/util.js';
 import { parseDo } from './lib/commands.js';
+import { onBattery, notifyMac } from './lib/mac.js';
 
 const store = loadStore();
 const data = store.data;
@@ -48,7 +49,13 @@ const library = (devices.library = new SceneLibrary());
 const trial = new Trial(devices);
 const pin = new Pin(store);
 const clients = new Set();
-const scheduler = new Scheduler({ store, devices, fades, notify: (msg) => broadcast('toast', { msg }) });
+// Open pages show every message; important ones (an alarm that failed, was missed or may not run) also
+// go to a Mac notification, since nobody has the page open at 6 in the morning
+const notify = (msg, { important = false } = {}) => {
+  broadcast('toast', { msg, ...(important && { kind: 'error' }) });
+  if (important) notifyMac('Lights', msg);
+};
+const scheduler = new Scheduler({ store, devices, fades, notify, system: { onBattery } });
 
 // ---------- live updates (Server-Sent Events) ----------
 
@@ -62,6 +69,8 @@ function snapshot() {
     hiddenScenes: data.hiddenScenes,
     alarms: data.alarms,
     upcoming: scheduler.upcoming(),
+    runs: scheduler.runs,
+    risks: scheduler.risks,
     timers: data.timers,
     trial: trial.view(),
     settings: {
@@ -112,10 +121,14 @@ function small(v) {
 
 lan.on('traffic', (m) => devPush(traffic, 'traffic', { via: 'lan', ...m, data: small(m.data) }));
 
-// Server output also goes to the developer page
+// Server output also goes to the developer page. In the log (data/server.log) each line gets the time.
 for (const level of ['log', 'warn', 'error']) {
   const write = console[level].bind(console);
-  console[level] = (...args) => { write(...args); devPush(logs, 'log', { level, text: format(...args) }); };
+  console[level] = (...args) => {
+    const text = format(...args);
+    write(`[${new Date().toLocaleString()}] ${text}`);
+    devPush(logs, 'log', { level, text });
+  };
 }
 
 function internals() {
@@ -532,7 +545,7 @@ let markReady;
 const ready = new Promise((r) => (markReady = r));
 
 server.listen(PORT, '0.0.0.0', async () => {
-  console.log(`[${new Date().toLocaleString()}] Lights server running:`);
+  console.log('Lights server running:');
   for (const u of urls()) console.log('  ' + u);
   keepMacAwake();
   await devices.start();

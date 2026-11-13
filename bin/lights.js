@@ -157,7 +157,7 @@ const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', m
 function relDay(ms) {
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(new Date(ms)) - day(new Date())) / 864e5);
-  return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : DAY_NAMES[new Date(ms).getDay()];
+  return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : diff === -1 ? 'yesterday' : DAY_NAMES[new Date(ms).getDay()];
 }
 
 function lightLine(d, width) {
@@ -405,6 +405,17 @@ async function timers(S, sub) {
 
 const sortedAlarms = (S) => [...S.alarms].sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
 
+/** How an alarm's last run went, see runs in lib/scheduler.js */
+function runLine(r) {
+  const when = `${relDay(r.at)} ${fmtTime(r.at)}`;
+  if (r.running) return dim(`▶ running now (${r.lights} light${r.lights === 1 ? '' : 's'})`);
+  if (r.missed) return red(`✗ missed ${when}: ${r.error}`);
+  if (r.ok) return dim(`${green('✓')} last run ${when}, reached ${r.lights === 1 ? 'the light' : `all ${r.lights} lights`}`);
+  const names = [...new Set((r.failed || []).map((f) => f.name))];
+  const who = r.error || !names.length || r.failed.length === r.lights ? "didn't reach the lights" : `${names.join(', ')} didn't answer`;
+  return red(`✗ ${when}: ${who} (${r.error || r.failed[0]?.error})`);
+}
+
 function listAlarms(S) {
   const list = sortedAlarms(S);
   if (!list.length) return console.log(dim('No alarms yet. Try: lights alarm add 7:00 wake weekdays'));
@@ -419,6 +430,9 @@ function listAlarms(S) {
     const time = a.enabled ? bold(pad(a.time, width)) : dim(pad(a.time, width));
     console.log(`  ${dim(String(n + 1).padStart(2))}  ${dot} ${time}  ${pad(alarmLabel(a), 24)} ${pad(describeDays(a.days), 14)} ${pad(a.target.map((r) => refName(S, r)).join(', '), 16)} ${next}`);
     for (const g of ownTimes(a)) console.log(`        ${dim(`${pad(g.time, width)}  ${describeDays(g.days)}`)}`);
+    if (a.enabled) for (const r of S.risks?.[a.id] || []) console.log(`        ${yellow(`⚠ may not run: ${r.text}`)}`);
+    const run = S.runs?.[a.id];
+    if (run) console.log(`        ${runLine(run)}`);
   });
   console.log(dim(`\n  lights alarm on|off|rm|test <number>`));
   console.log();

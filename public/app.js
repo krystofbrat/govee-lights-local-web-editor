@@ -44,6 +44,7 @@ const ICONS = {
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
   wifi: '<path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  warn: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   minus: '<path d="M5 12h14"/>',
 };
 
@@ -171,7 +172,7 @@ function connect() {
     connected = true;
     render();
   });
-  es.addEventListener('toast', (e) => toast(JSON.parse(e.data).msg));
+  es.addEventListener('toast', (e) => { const t = JSON.parse(e.data); toast(t.msg, t.kind); });
   es.onerror = () => {
     connected = false;
     render();
@@ -291,8 +292,8 @@ const fmtHM = (hm) => { const [h, m] = hm.split(':'); return fmtTime(new Date(20
 function relDay(ms, lower = false) {
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(new Date(ms)) - day(new Date())) / 864e5);
-  const s = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : DAY_NAMES[new Date(ms).getDay()];
-  return lower && diff <= 1 ? s.toLowerCase() : s;
+  const s = diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : DAY_NAMES[new Date(ms).getDay()];
+  return lower && Math.abs(diff) <= 1 ? s.toLowerCase() : s;
 }
 function fmtDuration(ms) {
   const m = Math.max(1, Math.round(ms / 60000));
@@ -478,7 +479,9 @@ function hero(devs) {
   const status = unreachable ? `Can't reach your light${devs.length > 1 ? 's' : ''}`
     : !on.length ? 'Everything is off' : on.length === devs.length ? (devs.length === 1 ? 'Your light is on' : `All ${devs.length} lights on`) : `${on.length} of ${devs.length} lights on`;
   const meta = [
-    alarm && `<button class="hero-meta" data-action="tab" data-tab="alarms">${icon(TYPE_INFO[alarm.type].icon)}${esc(alarm.name || TYPE_INFO[alarm.type].short)} · ${relDay(next.at)} ${fmtTime(next.at)}</button>`,
+    alarm && (S.risks?.[alarm.id]
+      ? `<button class="hero-meta warn" data-action="tab" data-tab="alarms" title="${esc(S.risks[alarm.id].map((r) => r.text).join(' '))}">${icon('warn')}${esc(alarm.name || TYPE_INFO[alarm.type].short)} · ${relDay(next.at)} ${fmtTime(next.at)} may not run</button>`
+      : `<button class="hero-meta" data-action="tab" data-tab="alarms">${icon(TYPE_INFO[alarm.type].icon)}${esc(alarm.name || TYPE_INFO[alarm.type].short)} · ${relDay(next.at)} ${fmtTime(next.at)}</button>`),
     S.timers.length && `<button class="hero-meta" data-action="tab" data-tab="alarms">${icon('moon')}Sleep timer · off at ${fmtTime(S.timers[0].endsAt)}</button>`,
     offline && !unreachable && `<span class="hero-meta warn">${icon('wifi')}${offline} offline</span>`,
   ].filter(Boolean).join('');
@@ -825,6 +828,23 @@ const smallAmPm = (text) => esc(text).replace(/\s*([AaPp]\.?\s?[Mm]\.?)$/, '<sma
 /** "Mon, Wed 5:30 AM · Tue, Thu, Fri 6:30 AM" for an alarm with a time per day */
 const dayTimesText = (a) => dayTimeGroups(a).map((g) => `${describeDays(g.days)} ${fmtHM(g.time)}`).join(' · ');
 
+/** How the alarm's last run went: { ok, text }, or null if it hasn't run yet */
+function lastRun(a) {
+  const r = S.runs?.[a.id];
+  if (!r) return null;
+  const when = `${relDay(r.at)} ${fmtTime(r.at)}`, inText = `${relDay(r.at, true)} ${fmtTime(r.at)}`;
+  if (r.running) return { ok: true, running: true, text: `Running now · ${r.lights} light${r.lights === 1 ? '' : 's'}` };
+  if (r.missed) return { ok: false, text: `Missed ${inText} · ${r.error}` };
+  if (r.ok) return { ok: true, text: `Last run ${inText} · reached ${r.lights === 1 ? 'the light' : `all ${r.lights} lights`}` };
+  const names = [...new Set((r.failed || []).map((f) => f.name))];
+  const who = r.error || names.length === 0 || r.failed.length === r.lights ? "didn't reach the lights" : `${names.join(', ')} didn't answer`;
+  return { ok: false, text: `${when}: ${who} · ${r.error || r.failed[0]?.error}` };
+}
+
+/** Why the alarm's next run may not work (Mac on battery, lights not answering), as warning lines */
+const riskLines = (a, cls = 'warn') => (S.risks?.[a.id] || [])
+  .map((r) => `<span class="${cls}">${icon('warn')}<span>${esc(r.text)}</span></span>`).join('');
+
 function alarmCard(a) {
   const up = S.upcoming.find((u) => u.id === a.id);
   const sun = parseSunTime(a.time);
@@ -840,6 +860,7 @@ function alarmCard(a) {
   const sub = [a.target.map(targetName).join(', '), a.name ? alarmLine(a) : ''].filter(Boolean).join(' · ');
   // Sun times and times per day show when they'll actually happen next; sun times also what they follow
   const time = sun ? (up ? fmtTime(up.at) : cap(sun.event)) : a.times && up ? fmtTime(up.at) : fmtHM(a.time);
+  const last = lastRun(a);
   return `<article class="alarm ${a.enabled ? '' : 'disabled'}" data-key="a-${a.id}" style="--strip:${alarmStrip(a)}">
     <button class="alarm-main" data-action="edit-alarm" data-id="${a.id}">
       <span class="alarm-time">${smallAmPm(time)}</span>
@@ -849,6 +870,8 @@ function alarmCard(a) {
         ${a.times ? `<span class="day-times-text">${esc(dayTimesText(a))}</span>` : ''}
         <span class="sub">${dayDots(a.days)}<span class="sub-text">${esc(sub)}</span></span>
         ${next ? `<span class="next">${esc(next)}</span>` : ''}
+        ${a.enabled ? riskLines(a) : ''}
+        ${last ? `<span class="last ${last.ok ? 'ok' : 'bad'}">${icon(last.running ? 'play' : last.ok ? 'check' : 'x')}<span>${esc(last.text)}</span></span>` : ''}
       </span>
     </button>
     <button class="switch" role="switch" aria-checked="${a.enabled}" aria-label="Alarm on" data-action="toggle-alarm" data-id="${a.id}"></button>
@@ -876,7 +899,8 @@ function viewAlarms() {
         <h1>${relDay(next.at)} ${fmtTime(next.at)}</h1>
         <p class="muted">${esc(na.name || TYPE_INFO[na.type].label)} · ${na.type === 'sunrise' && next.start > now
           ? `lights start at ${fmtTime(next.start)}, in ${fmtDuration(next.start - now)}`
-          : `in ${fmtDuration(next.at - now)}`}</p></div>
+          : `in ${fmtDuration(next.at - now)}`}</p>
+        ${riskLines(na, 'next-warn')}</div>
       <span class="next-icon" aria-hidden="true">${icon(TYPE_INFO[na.type].icon)}</span>
     </section>` : '';
   return `

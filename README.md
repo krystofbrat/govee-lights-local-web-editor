@@ -22,7 +22,8 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 
 - **Local Wi-Fi (LAN) control**: on/off, brightness, color and white respond instantly and work without internet.
 - **Govee cloud API**: Govee scenes, DIY scenes and snapshots, music mode, per-segment colors, and lights that don't have LAN Control.
-- **Alarms**: sunrise fade to wake up (deep red → warm → bright white), turn on, turn off with a fade-out, per weekday, with its own time on some days if you like (5:30 on Monday, 6:30 the rest of the week). At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
+- **Alarms**: sunrise fade to wake up (from 0.1% deep red → warm → bright white), turn on, turn off with a fade-out, per weekday, with its own time on some days if you like (5:30 on Monday, 6:30 the rest of the week). At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
+- **Alarms you can trust**: each alarm shows how its last run went (or that it was missed because the Mac was asleep), and a Mac notification warns you in the evening if tomorrow's alarm may not run.
 - **One-tap looks** (Bright, Relax, Focus, Movie, Night light) next to your own favorites, and a drag-to-pick **color wheel**.
 - **Dimmer than 1%**: 0.5%, 0.25% or 0.1% for a night light, below the lowest brightness Govee allows (see *Things to know*).
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
@@ -133,6 +134,10 @@ It only takes POST with a JSON body, so other websites can't trigger it. `POST /
 
 **Alarms run on your computer, not on the lights.** Govee doesn't let other apps write the timers stored on the light, so the server has to be running when an alarm is due. On macOS it keeps the Mac from sleeping on its own **while it's plugged in** (`caffeinate -s`). On battery or with the lid closed, a MacBook sleeps and alarms won't fire. To let the Mac sleep anyway, set `LIGHTS_ALLOW_SLEEP=1`.
 
+**You'll know when an alarm didn't work, or may not.** Each alarm shows its last run: "reached all 3 lights", which lights didn't answer and why (like no internet), or *Missed* if the Mac was asleep or the server wasn't running. When an alarm is less than 10 hours away and the Mac is on battery, or its lights aren't answering, the alarm shows a warning, and after 5 minutes you also get a Mac notification. A failed or missed alarm sends one too. Notifications come from *Script Editor* (that's how scripts show them); if none appear, allow it in *System Settings → Notifications*. To turn them off, set `LIGHTS_NO_NOTIFY=1`. The log (`data/server.log`) has the time on every line.
+
+**The sunrise starts below 1%.** On lights with color LEDs it begins at about 0.1% (1% with a very dark red, see *Dimmer than 1%* below) and grows from there, so the first minutes are gentler than Govee's 1%. Lights without color LEDs start at 1%.
+
 **Anyone on your Wi-Fi can use it, unless you set a PIN.** The server listens on your local network so your phone can reach it, so without a PIN anyone on the same network can open the web app and control your lights. To keep them out, set one in *Settings → PIN* or with `lights pin <4-12 digits>`:
 
 - Phones and other computers ask for it once, then stay unlocked for a year. Changing the PIN logs them all out.
@@ -168,6 +173,7 @@ Everything is set in the app or with `lights` commands. These environment variab
 | `LIGHTS_DATA_DIR` | `./data` | Where settings, the API key and logs are stored |
 | `GOVEE_API_KEY` | | API key to use if none is saved yet |
 | `LIGHTS_ALLOW_SLEEP` | | Set to `1` to let the Mac sleep (alarms may not fire) |
+| `LIGHTS_NO_NOTIFY` | | Set to `1` for no Mac notifications about alarms that failed, were missed or may not run |
 | `LIGHTS_ALLOWED_HOSTS` | | Extra host names the web app may be opened at, comma-separated (like `lights.example.com,mac.lan`). Exact names only. `localhost`, `*.local`, `*.ts.net`, this computer's name and IP addresses always work |
 | `NO_COLOR` | | Turns off colors in `lights` output |
 

@@ -563,6 +563,14 @@ select.input { appearance: none; -webkit-appearance: none; padding-right: 36px; 
 .day-dots.once { font-size: 12px; font-weight: 700; color: var(--muted); }
 .alarm-meta .next { color: var(--accent); font-size: 13px; font-weight: 600; }
 .alarm-meta .day-times-text { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Why the next run may not work, and how the last one went */
+.alarm-meta .warn, .alarm-meta .last, .next-alarm .next-warn { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; line-height: 1.35; }
+.alarm-meta .warn svg.i, .alarm-meta .last svg.i, .next-alarm .next-warn svg.i { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.alarm-meta .warn, .next-alarm .next-warn { color: var(--danger); font-weight: 600; }
+.next-alarm .next-warn { margin-top: 8px; }
+.alarm-meta .last { color: var(--muted); }
+.alarm-meta .last.ok svg.i { color: var(--ok); }
+.alarm-meta .last.bad { color: var(--danger); }
 @media (max-width: 520px) { .alarm-main { flex-direction: column; align-items: flex-start; gap: 8px; } .alarm-time { font-size: 32px; } }
 
 .next-alarm {

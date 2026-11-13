@@ -24,6 +24,9 @@ const ICONS = {
   send: '<path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
+  wifi: '<path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>',
+  cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>',
 };
 const icon = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -78,6 +81,7 @@ const ui = {
   open: null,         // the traffic row or event being looked at
   raw: new Map(),     // device id → its raw JSON, while shown
   api: { method: 'GET', path: '/api/state', body: '', result: null, busy: false },
+  checks: {},         // check key → { busy, result: { ok, text } }, see CHECKS
 };
 
 const TABS = [
@@ -210,20 +214,29 @@ const TIMINGS = [
   ['Ask Govee for cloud-only lights’ state', 'every 5 min (saves the daily quota)', 'lib/devices.js'],
   ['Time between cloud requests for one light', '450 ms at least', 'lib/devices.js'],
   ['Keep a light’s scene list', '6 h', 'lib/devices.js'],
-  ['Fades and sunrises take a step', 'every 2 s on Local Wi-Fi, 20 s on the cloud', 'lib/fades.js'],
-  ['Check whether an alarm is due', 'every 5 s (up to 5 min late if the Mac was asleep)', 'lib/scheduler.js'],
+  ['Fades and sunrises take a step', 'every 2 s on Local Wi-Fi; on the cloud every 20 s, or more often so a short fade still gets 15 steps', 'lib/fades.js'],
+  ['Check whether an alarm is due', 'every 5 s; up to 5 min late if the Mac was asleep, later than that it counts as missed', 'lib/scheduler.js'],
+  ['Look for reasons an alarm may not run (Mac on battery, lights not answering)', 'every 60 s, for alarms in the next 10 h; a notification once one has lasted 5 min', 'lib/scheduler.js'],
+  ['Keep the Mac awake for alarms (caffeinate -s)', 'while it’s plugged in, as long as the server runs', 'server.js'],
   ['Trying a scene or color', '10 s, then it goes back', 'lib/trial.js'],
   ['Tell open pages something changed', 'within 120 ms', 'lib/devices.js'],
 ];
 
+// Every file in lib/ is listed (test/dev.test.js checks it)
 const FILES = [
-  ['server.js', 'HTTP API, live updates and the alarm scheduler'],
+  ['server.js', 'HTTP API and live updates; starts everything else'],
   ['bin/lights.js', 'the lights command; talks to the server over HTTP like the web app does'],
   ['lib/devices.js', 'merges LAN and cloud lights and sends each command the fastest way'],
   ['lib/lan.js', 'Govee’s LAN protocol: JSON over UDP (scan on 4001, answers on 4002, commands on 4003)'],
   ['lib/cloud.js', 'Govee Developer API v2 client'],
   ['lib/fades.js', 'sunrise and fade-out engine'],
-  ['lib/scheduler.js', 'alarms and sleep timers'],
+  ['lib/scheduler.js', 'alarms, how their last run went and why the next may not work, and sleep timers'],
+  ['lib/mac.js', 'whether the Mac is on battery, and Mac notifications'],
+  ['lib/health.js', 'how the cloud and the Wi-Fi scans have been doing, for this page'],
+  ['lib/commands.js', 'what the words in “lights desk warm 40” and in Siri Shortcuts mean'],
+  ['lib/auth.js', 'the optional PIN: a salted hash, and the cookie a device gets for it'],
+  ['lib/hosts.js', 'which names the server answers to, and which requests come from this computer'],
+  ['lib/service.js', 'the macOS service that starts the server at login'],
   ['lib/trial.js', 'try a look for a few seconds, then undo or keep'],
   ['lib/library.js', 'scene pictures and categories (optional)'],
   ['lib/store.js', 'reads and writes data/lights.json'],
@@ -234,6 +247,87 @@ const FILES = [
 function stat(label, value, sub, status = '') {
   return `<div class="stat"><span class="stat-label">${status ? `<span class="led ${status}" aria-hidden="true"></span>` : ''}${label}</span>
     <b class="stat-value">${value}</b><span class="stat-sub">${sub}</span></div>`;
+}
+
+const hm = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const secs = (ms) => (ms == null ? '–' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** How the cloud, the Wi-Fi scans and the Mac have been doing (see lib/health.js) */
+function healthSection() {
+  const { hour, day, lastScan, lastAnswer } = D.health;
+  const up = serverNow() - D.process.startedAt;
+  const dayLabel = up >= 864e5 ? 'last 24 h' : `since the server started ${dur(up)} ago`;
+
+  const c = hour.cloud, cd = day.cloud;
+  const cloud = !D.cloud.hasKey
+    ? stat('Cloud requests', 'No API key', 'Lights without LAN Control need one (Settings → API key).', 'warn')
+    : stat('Cloud requests', c.requests ? `${plural(c.requests, 'request')}, ${c.failed} failed` : 'None',
+      esc([
+        c.median != null && `Usually ${secs(c.median)}, slowest ${secs(c.slowest)}.`,
+        `${cap(dayLabel)}: ${plural(cd.requests, 'request')}, ${cd.failed} failed.`,
+        cd.lastFailure && `Last failure at ${hm(cd.lastFailure.t)}: ${cd.lastFailure.error}`,
+      ].filter(Boolean).join(' ')),
+      c.requests && c.failed === c.requests ? 'bad' : c.failed ? 'warn' : 'ok');
+
+  const l = hour.lan, ld = day.lan;
+  const where = lastScan?.interfaces?.length ? ` Scanning on ${lastScan.interfaces.join(', ')}.` : '';
+  const lan = !D.lan.ready
+    ? stat('Wi-Fi scans', 'Off', esc(D.lan.error || 'UDP port 4002 isn’t open.'), 'bad')
+    : stat('Wi-Fi scans', `${plural(l.scans, 'scan')}, ${plural(l.answers, 'answer')}`,
+      esc(l.answers
+        ? `From ${plural(l.from.length, 'light')}, the last ${ago(lastAnswer?.t)}.${where}`
+        : `No light answered${ld.answers ? ` (${ld.answers} did, ${dayLabel})` : ''}. Is LAN Control on in the Govee Home app, and is this Mac on the same Wi-Fi as the lights?${where}`),
+      l.answers ? 'ok' : 'warn');
+
+  const m = D.mac;
+  let mac;
+  if (!m.isMac) mac = stat('This computer', 'Not a Mac', 'Keeping it awake for alarms is up to you.');
+  else {
+    const note = m.notifications ? ' Notifications on.' : ' Notifications off (LIGHTS_NO_NOTIFY).';
+    if (m.onBattery) mac = stat('This Mac', 'On battery', esc('It sleeps normally, so alarms may not run. Plug it in and keep the lid open.' + note), 'warn');
+    else if (m.allowSleep) mac = stat('This Mac', m.onBattery === false ? 'Plugged in' : 'Power unknown', esc('LIGHTS_ALLOW_SLEEP is set, so it may sleep through alarms.' + note), 'warn');
+    else if (m.onBattery === false) {
+      mac = stat('This Mac', 'Plugged in', esc((m.keptAwake ? 'Kept awake for alarms (caffeinate -s). Closing the lid still puts it to sleep.' : 'Not kept awake: caffeinate isn’t running.') + note), m.keptAwake ? 'ok' : 'warn');
+    } else mac = stat('This Mac', 'Power unknown', esc('Checked once a minute.' + note));
+  }
+
+  return section('Health, last hour', `<div class="stats">${cloud}${lan}${mac}</div>`);
+}
+
+// Buttons that check a connection; none of them change the lights (routes in server.js)
+const CHECKS = {
+  scan: {
+    label: 'Scan Wi-Fi now', icon: 'wifi', path: '/api/dev/scan',
+    hint: 'Looks for lights on this Wi-Fi for 4 seconds.',
+    describe: (r) => (r.answered.length
+      ? { ok: true, text: `${plural(r.answered.length, 'light')} answered: ${r.answered.map((x) => `${x.name} (${x.ip})`).join(', ')}.` }
+      : { ok: false, text: `No light answered in ${r.waited / 1000} s on ${r.interfaces.join(', ') || 'any network'}. Is LAN Control on in the Govee Home app, and is this Mac on the same Wi-Fi as the lights?` }),
+  },
+  cloud: {
+    label: 'Check Govee cloud', icon: 'cloud', path: '/api/dev/cloud-check',
+    hint: 'Asks Govee for your lights and times the answer. Uses 1 of today’s 10,000 requests.',
+    describe: (r) => (r.ok
+      ? { ok: true, text: `Govee answered in ${secs(r.ms)} and lists ${plural(r.lights, 'light')}.` }
+      : { ok: false, text: `${r.error} (after ${secs(r.ms)})` }),
+  },
+  notify: {
+    label: 'Send a test notification', icon: 'bell', path: '/api/dev/notify',
+    hint: 'The kind alarms send when they fail, are missed or may not run.',
+    describe: (r) => (r.sent
+      ? { ok: true, text: 'Sent. If nothing popped up, allow Script Editor in System Settings → Notifications.' }
+      : { ok: false, text: r.reason }),
+  },
+};
+
+function checksSection() {
+  return section('Checks', `<div class="list table checks">${Object.entries(CHECKS).map(([key, c]) => {
+    const s = ui.checks[key] || {};
+    const text = s.busy ? 'Checking…' : s.result ? s.result.text : c.hint;
+    return `<div class="list-row"><button class="btn small" data-action="check" data-key="${key}" ${s.busy ? 'disabled' : ''}>${icon(c.icon)}${c.label}</button>
+      <span class="grow check-result ${s.result ? (s.result.ok ? 'ok' : 'bad') : 'muted'}" role="status">${esc(text)}</span></div>`;
+  }).join('')}</div>
+  <p class="hint" style="margin-top:10px">None of these change your lights.</p>`);
 }
 
 function viewOverview() {
@@ -263,6 +357,9 @@ function viewOverview() {
       ${stat('Live connections', plural(p.appPages + p.devPages, 'stream'), `${p.appPages} on /api/events, ${p.devPages} on /api/dev/events (this page uses one of each)`)}
       ${stat('Running', `${plural(D.fades.length, 'fade')} · ${plural(S.timers.length, 'timer')}`, nextAlarm)}
     </div>`)}
+
+    ${healthSection()}
+    ${checksSection()}
 
     <div class="how">
       ${section('How a command reaches a light', `<div class="flow" aria-label="Diagram">
@@ -493,6 +590,9 @@ const ROUTE_INFO = {
   'GET /api/dev': ['What this page reads: the server’s insides, its routes, recent traffic and output.'],
   'GET /api/dev/events': ['This page’s live stream, so it can’t be sent from here.'],
   'GET /api/dev/devices/:id': ['Everything the server holds about one light, including Govee’s raw capabilities.'],
+  'POST /api/dev/scan': ['Scan the Wi-Fi for lights now, and list the ones that answer within 4 seconds. Doesn’t change them.', {}],
+  'POST /api/dev/cloud-check': ['Ask Govee for your list of lights and time the answer. Uses 1 request of the daily quota.', {}],
+  'POST /api/dev/notify': ['Show a test Mac notification, like the ones about alarms.', {}],
 };
 
 // Fills ":id" with something that exists, so the example works as is
@@ -647,6 +747,21 @@ document.addEventListener('click', async (e) => {
     schedule(true);
   } else if (act === 'send') {
     send();
+  } else if (act === 'check') {
+    const key = el.dataset.key;
+    const s = (ui.checks[key] ||= {});
+    if (s.busy) return;
+    Object.assign(s, { busy: true, result: null });
+    schedule(true);
+    try {
+      const res = await fetch(CHECKS[key].path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const out = await res.json().catch(() => ({}));
+      s.result = res.ok ? CHECKS[key].describe(out) : { ok: false, text: out.error || `HTTP ${res.status}` };
+    } catch {
+      s.result = { ok: false, text: 'Couldn’t reach the lights server.' };
+    }
+    s.busy = false;
+    schedule(true);
   } else if (act === 'copy-curl') {
     try {
       await navigator.clipboard.writeText(curl());

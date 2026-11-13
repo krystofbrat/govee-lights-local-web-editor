@@ -16,9 +16,10 @@ import { SceneLibrary } from './lib/library.js';
 import { Trial } from './lib/trial.js';
 import { hostAllowed, parseHostList, fromThisComputer } from './lib/hosts.js';
 import { Pin } from './lib/auth.js';
-import { parseLatLon } from './lib/util.js';
+import { parseLatLon, sleep } from './lib/util.js';
 import { parseDo } from './lib/commands.js';
 import { onBattery, notifyMac } from './lib/mac.js';
+import { Health } from './lib/health.js';
 
 const store = loadStore();
 const data = store.data;
@@ -33,6 +34,7 @@ const APP_VERSION = ['public', 'lib/util.js'].flatMap((p) => {
 }).map((f) => fs.statSync(f).mtimeMs).reduce((a, b) => Math.max(a, b), 0).toString(36);
 
 const today = () => new Date().toLocaleDateString('en-CA');
+const health = new Health();
 const cloud = new CloudApi({
   getKey: () => data.apiKey,
   onRequest: () => {
@@ -40,7 +42,10 @@ const cloud = new CloudApi({
     data.usage.count++;
     store.save();
   },
-  onTraffic: (r) => devPush(traffic, 'traffic', { via: 'cloud', ...r, payload: small(r.payload), response: small(r.response) }),
+  onTraffic: (r) => {
+    health.cloudRequest(r);
+    devPush(traffic, 'traffic', { via: 'cloud', ...r, payload: small(r.payload), response: small(r.response) });
+  },
 });
 const lan = new Lan();
 const devices = new Devices({ store, cloud, lan });
@@ -119,7 +124,10 @@ function small(v) {
   return s && s.length > 20_000 ? { truncated: `${(s.length / 1024).toFixed(0)} KB, not kept` } : v;
 }
 
-lan.on('traffic', (m) => devPush(traffic, 'traffic', { via: 'lan', ...m, data: small(m.data) }));
+lan.on('traffic', (m) => {
+  health.lan(m);
+  devPush(traffic, 'traffic', { via: 'lan', ...m, data: small(m.data) });
+});
 
 // Server output also goes to the developer page. In the log (data/server.log) each line gets the time.
 for (const level of ['log', 'warn', 'error']) {
@@ -145,6 +153,12 @@ function internals() {
     fades: [...fades.jobs].map((j) => ({ label: j.label, ids: [...j.ids], startAt: j.startAt, durationMs: j.durationMs, end: j.end })),
     lan: { ready: lan.ready, error: lan.error },
     cloud: { hasKey: !!data.apiKey, error: devices.cloudError, offline: !!devices.cloudOffline, usage: data.usage.day === today() ? data.usage.count : 0 },
+    health: health.view(),
+    // onBattery is from the alarm check, once a minute (null until then, or when it can't tell)
+    mac: {
+      isMac: process.platform === 'darwin', onBattery: scheduler.battery ?? null, keptAwake: caffeinated,
+      allowSleep: !!process.env.LIGHTS_ALLOW_SLEEP, notifications: !process.env.LIGHTS_NO_NOTIFY,
+    },
     process: {
       pid: process.pid, node: process.version, platform: `${process.platform} ${process.arch}`, startedAt: Date.now() - process.uptime() * 1000,
       rss: mem.rss, heap: mem.heapUsed, dataDir: DATA_DIR, version: APP_VERSION, appPages: clients.size, devPages: devClients.size,
@@ -381,6 +395,50 @@ route('GET', '/api/dev/devices/:id', (req, res, body, p) => {
   return { ...d, view: devices.view(d) };
 });
 
+// ---------- developer page checks (none of them change the lights) ----------
+
+const SCAN_WAIT = 4000;
+
+// Scan the Wi-Fi now and list the lights that answer within a few seconds
+route('POST', '/api/dev/scan', async () => {
+  if (!lan.ready) throw new UserError(lan.error || 'Local Wi-Fi is off', 503);
+  const answered = new Map();
+  const onDevice = ({ id, ip, sku }) => answered.set(id, { id, ip, sku });
+  lan.on('device', onDevice);
+  try {
+    await lan.scan();
+    await sleep(SCAN_WAIT);
+  } finally {
+    lan.off('device', onDevice);
+  }
+  const interfaces = Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+  return {
+    interfaces, waited: SCAN_WAIT,
+    answered: [...answered.values()].map((x) => ({ ...x, name: devices.get(x.id) ? devices.nameOf(devices.get(x.id)) : x.sku })),
+  };
+});
+
+// Ask Govee for the list of lights, to see whether the cloud answers and how fast. Uses 1 request of the day's quota.
+route('POST', '/api/dev/cloud-check', async () => {
+  if (!data.apiKey) throw new UserError('No Govee API key set (Settings → API key)', 400);
+  const started = Date.now();
+  try {
+    const list = await cloud.devices();
+    return { ok: true, ms: Date.now() - started, lights: list.length };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - started, status: e.status || 0, error: e.message };
+  }
+});
+
+// A test Mac notification, to see whether they show up (macOS may need Script Editor allowed in Notifications)
+route('POST', '/api/dev/notify', () => {
+  if (process.platform !== 'darwin') return { sent: false, reason: 'Notifications only work on a Mac' };
+  if (process.env.LIGHTS_NO_NOTIFY) return { sent: false, reason: 'LIGHTS_NO_NOTIFY is set, so notifications are off' };
+  notifyMac('Lights', 'Test from the developer page: notifications work.');
+  return { sent: true };
+});
+
 // ---------- PIN ----------
 
 // The only routes that answer without the PIN: whether one is needed, and entering it
@@ -558,9 +616,12 @@ server.listen(PORT, '0.0.0.0', async () => {
 
 // While plugged in, stop the Mac from going to sleep on its own, or alarms can't fire.
 // (-s only applies on AC power; on battery the Mac sleeps normally. -w ends it with this process.)
+let caffeinated = false;
 function keepMacAwake() {
   if (process.platform !== 'darwin' || process.env.LIGHTS_ALLOW_SLEEP) return;
   try {
-    spawn('/usr/bin/caffeinate', ['-s', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {});
+    const child = spawn('/usr/bin/caffeinate', ['-s', '-w', String(process.pid)], { stdio: 'ignore' });
+    caffeinated = true;
+    child.on('error', () => { caffeinated = false; }).on('exit', () => { caffeinated = false; });
   } catch {}
 }

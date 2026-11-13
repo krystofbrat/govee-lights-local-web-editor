@@ -36,6 +36,11 @@ a { color: var(--accent); }
 .led.ok { background: var(--ok); }
 .led.warn { background: var(--accent); }
 .led.bad { background: var(--danger); }
+/* Overview → Checks */
+.checks .list-row { align-items: center; }
+.checks .btn { flex: none; min-width: 200px; justify-content: flex-start; }
+.check-result { font-size: 14px; line-height: 1.4; }
+.check-result.bad { color: var(--danger); }
 
 .how { display: grid; gap: 0 32px; }
 @media (min-width: 860px) { .how { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }

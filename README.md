@@ -194,13 +194,15 @@ On macOS, `lights service install` saves the `LIGHTS_*` variables that are set w
 Open `http://localhost:8420/dev` (or run `lights dev`, or *Settings → Developer page*) to watch the server work while it runs:
 
 - **Overview**: how a command travels from the app to a light, live status of Local Wi-Fi and the cloud, and the timings it uses.
+  - **Health**: over the last hour (and day), how many cloud requests failed and how long they took, how many Wi-Fi scans any light answered, and whether the Mac is on battery or kept awake for alarms.
+  - **Checks**: buttons to scan the Wi-Fi now, check that Govee's cloud answers (uses 1 request), and send a test notification.
 - **Lights**: what the server knows about each light, why it uses Local Wi-Fi or the cloud for it, its cloud queue, and the raw JSON.
 - **Traffic**: every message to and from the lights, LAN and cloud, with the exact payload and Govee's answer.
 - **Events**: what the server pushes to open pages, and what changed each time.
 - **Console**: the server's recent output.
 - **API**: every route, with a working example. Send it from the page or copy it as `curl`.
 
-It's read-only except for the API tab, whose requests are real and change your lights. It only works on the computer running the server (other devices on your Wi-Fi get a "not here" message), and it never shows the API key.
+It only looks, except for the API tab, whose requests are real and change your lights. The checks don't change them. It only works on the computer running the server (other devices on your Wi-Fi get a "not here" message), and it never shows the API key.
 
 ## How it's built
 

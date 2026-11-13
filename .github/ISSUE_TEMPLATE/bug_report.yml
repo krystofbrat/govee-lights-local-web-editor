@@ -56,5 +56,10 @@ body:
     id: logs
     attributes:
       label: Server log
-      description: What `lights logs` shows around the time it happened.
+      description: What `lights logs` shows around the time it happened (each line starts with its time).
       render: text
+  - type: textarea
+    id: alarm
+    attributes:
+      label: Alarm problem? What its card says
+      description: In the Alarms tab, the line under the alarm, like "Missed today 6:30 AM · Your Mac was asleep" or "… didn't answer".

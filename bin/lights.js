@@ -45,7 +45,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights ${dim('[name]')} timer ${dim('<min>')}       switch off after N minutes, no fade
   lights timers ${dim('[cancel]')}           list or cancel sleep timers
 
-  ${bold('lights alarms')}                   list alarms
+  ${bold('lights alarms')}                   list alarms, how each last ran, and why the next may not
   lights alarm add ${dim('<when> [wake|on|off] [days] [options]')}
       when     7:00 | 6:30am  ${dim('or the real sun:')} sunrise | sunset | sunset-30 | sunrise+15
                ${dim('(minutes before/after; needs "lights location")')}
@@ -65,7 +65,7 @@ ${bold('lights')} — control your Govee lights from the terminal
   lights group add ${dim('<group> <light> [light…]')}  /  lights group rm ${dim('<group>')}
 
   lights open                      open the web app in your browser
-  lights dev                       open the developer page ${dim('(live traffic, events, API explorer)')}
+  lights dev                       open the developer page ${dim('(health, checks, live traffic, API explorer)')}
   lights key ${dim('<api-key>')}               save your Govee API key
   lights location ${dim('<lat> <lon> | off')}  where you are, for alarms at sunrise/sunset ${dim('(e.g. 50.08 14.43)')}
   lights pin ${dim('<digits> | off')}         a PIN other devices need for the web app ${dim('(this computer never does)')}

@@ -10,9 +10,9 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/lights.png" width="240" alt="The Lights tab on a phone: each light with its color, brightness and power switch, and one-tap looks">
-  <img src="docs/screenshots/color-wheel.png" width="240" alt="One light's controls: a color wheel to drag on, with brightness and white sliders">
-  <img src="docs/screenshots/alarms.png" width="240" alt="The Alarms tab: a sunrise fade on weekdays, and lights that come on 30 minutes before sunset">
+  <img src="docs/screenshots/lights.png" width="240" alt="The Lights tab on a phone: how many lights are on, the next alarm, favorites, a room, and each light with its brightness and power switch">
+  <img src="docs/screenshots/color-wheel.png" width="240" alt="One light's controls: brightness, dimmer than 1%, favorites, and a color wheel to drag on">
+  <img src="docs/screenshots/alarms.png" width="240" alt="The Alarms tab: a sunrise fade on weekdays and lights that come on 30 minutes before sunset on weekends, each showing how its last run went">
 </p>
 <p align="center">
   <img src="docs/screenshots/try-scene.gif" width="300" alt="Trying a Govee scene: the lights show it for 10 seconds, then go back unless you tap Keep">
@@ -23,7 +23,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 - **Local Wi-Fi (LAN) control**: on/off, brightness, color and white respond instantly and work without internet.
 - **Govee cloud API**: Govee scenes, DIY scenes and snapshots, music mode, per-segment colors, and lights that don't have LAN Control.
 - **Alarms**: sunrise fade to wake up (from 0.1% deep red → warm → bright white), turn on, turn off with a fade-out, per weekday, with its own time on some days if you like (5:30 on Monday, 6:30 the rest of the week). At a clock time, or with the real sun: “30 minutes before sunset”, “at sunrise”.
-- **Alarms you can trust**: each alarm shows how its last run went (or that it was missed because the Mac was asleep), and a Mac notification warns you in the evening if tomorrow's alarm may not run.
+- **Alarms you can trust**: each alarm shows how its last run went (or that it was missed because the Mac was asleep), and a Mac notification warns you ahead of time if the next one may not run, like when the Mac is on battery.
 - **One-tap looks** (Bright, Relax, Focus, Movie, Night light) next to your own favorites, and a drag-to-pick **color wheel**.
 - **Dimmer than 1%**: 0.5%, 0.25% or 0.1% for a night light, below the lowest brightness Govee allows (see *Things to know*).
 - **Try before you keep**: trying a scene or color shows it for 10 seconds, then goes back unless you keep it.
@@ -36,7 +36,7 @@ A web app and `lights` terminal command for Govee lights, with sunrise alarms, s
 
 - **Node.js 20 or newer** (`node -v` to check). Get it from [nodejs.org](https://nodejs.org) or `brew install node`.
 - **Govee Wi-Fi lights.** Bluetooth-only models can't be controlled.
-- **macOS** for the full experience. The server itself runs anywhere Node does (Linux, a Raspberry Pi, Windows), but `lights service` (start at login) and keeping the computer awake for alarms are macOS only. Elsewhere, run `node server.js` from systemd or your init system of choice.
+- **macOS** for the full experience. The server itself runs anywhere Node does (Linux, a Raspberry Pi, Windows), but `lights service` (start at login), keeping the computer awake for alarms, and alarm notifications are macOS only. Elsewhere, run `node server.js` from systemd or your init system of choice.
 - At least one of:
   - a **Govee API key** (free, needed for scenes and for lights without LAN Control), or
   - **LAN Control** switched on for your lights (works with no key and no internet).
@@ -83,7 +83,7 @@ lights alarm add 23:30 off daily --for 15 --lights bedroom
 lights alarm add sunset-30 on --fav cozy       # 30 min before the sun sets
 lights location 50.08 14.43    # where you are, for sunrise/sunset times
 lights pin 482193              # other devices need this PIN (lights pin off)
-lights alarms                  # list; lights alarm off|on|rm|test <n>
+lights alarms                  # list, with how each last ran; lights alarm off|on|rm|test <n>
 lights group add bedroom lamp strip
 lights restart | logs          # server control
 lights dev                     # developer page: see how it works
@@ -155,7 +155,7 @@ Either way, requests from other websites and DNS-rebinding tricks are blocked, a
 
 **Dimmer than 1%.** Govee's lowest brightness is 1%. Below that, the app sets 1% and a darker version of the same color: 0.25% means a quarter of the color's strength. It only works on lights with color LEDs, whites are made with them too, and moving the brightness back to 1% or more brings the real color back. How much darker it really gets depends on the model; some lights may show dark colors almost as bright as normal ones.
 
-**Cloud limits.** Govee allows 10,000 cloud requests per day per key and limits how fast each light can be changed. The app queues commands per light and prefers LAN when it can. Settings shows today's count.
+**Cloud limits.** Govee allows 10,000 cloud requests per day per key and limits how fast each light can be changed. The app queues commands per light and prefers LAN when it can. Settings shows today's count. A sunrise on a cloud-only light changes every 20 seconds (a preview more often, so it still fades); over Local Wi-Fi it changes every 2 seconds.
 
 **What Govee's API can't do** (so neither can this app):
 
@@ -185,7 +185,9 @@ On macOS, `lights service install` saves the `LIGHTS_*` variables that are set w
 - **"UDP port 4002 is busy"**: another Govee integration (Homebridge, Home Assistant on the same machine) is using the LAN port. Stop it, or rely on the cloud.
 - **A light shows "offline"**: it's unplugged, off Wi-Fi, or Govee's cloud is down. Lights you've used before stay listed; *Forget* one in Settings once you no longer have it.
 - **"Govee rate limit reached"**: wait a minute; see *Cloud limits* above.
-- **Alarm didn't fire**: was the server running and the computer awake? `lights service status` and `lights logs` will tell you.
+- **Alarm didn't fire**: look under the alarm in the Alarms tab (or run `lights alarms`). *Missed* means the Mac was asleep (on battery or with the lid closed) or the server wasn't running; otherwise it says which lights didn't answer and why. `lights service status` and `lights logs` (every line has its time) tell you more.
+- **No notifications**: allow *Script Editor* in *System Settings → Notifications*, then try *Send a test notification* on the developer page (Overview → Checks).
+- **Lights only use the cloud, even with LAN Control on**: the Mac has to be on the same Wi-Fi as the lights (not a phone hotspot or a guest network). *Scan Wi-Fi now* on the developer page shows which lights answer.
 - **"Unknown host"**: the app was opened at a name it doesn't know, like a custom DNS name or a reverse proxy. To keep other websites out, it only answers to `localhost`, `*.local`, Tailscale `*.ts.net` names, this computer's name and IP addresses. Add other names to `LIGHTS_ALLOWED_HOSTS`.
 - **Changed the code?** `lights restart`.
 
@@ -207,13 +209,15 @@ It only looks, except for the API tab, whose requests are real and change your l
 ## How it's built
 
 ```text
-server.js           HTTP API, live updates (server-sent events) and the alarm scheduler
+server.js           HTTP API and live updates (server-sent events); starts everything else
 bin/lights.js       the `lights` CLI; talks to the server over HTTP
 lib/lan.js          Govee LAN protocol (UDP multicast scan on 4001, replies on 4002, commands on 4003)
 lib/cloud.js        Govee Developer API v2 client
 lib/devices.js      merges LAN and cloud lights and sends each command over the fastest route
 lib/fades.js        sunrise and fade-out engine
-lib/scheduler.js    alarms and sleep timers
+lib/scheduler.js    alarms (how their last run went, and why the next may not work) and sleep timers
+lib/mac.js          whether the Mac is on battery, and Mac notifications
+lib/health.js       how the cloud and Wi-Fi scans have been doing, for the developer page
 lib/trial.js        "try" a look for a few seconds, then undo or keep
 lib/library.js      scene pictures and categories (optional)
 lib/store.js        reads and writes data/lights.json
@@ -223,7 +227,7 @@ lib/service.js      the macOS start-at-login service file, with saved LIGHTS_* s
 lib/commands.js     what words like "off", "40", "warm" or "fav cozy" mean, for the CLI and Siri/Shortcuts
 lib/util.js         colors, times, sunrise/sunset and parsing, shared with the web app
 public/             the web app and the developer page at /dev (plain HTML, CSS and JavaScript, no build step)
-test/               tests for colors, times, sun times, light names, alarms, host names, the PIN, command words and the service file (npm test)
+test/               tests for colors, times, sun times, light names, fades and sunrises, alarms and their warnings, connection health, host names, the PIN, command words and the service file (npm test)
 ```
 
 No frameworks and no build step: edit a file, run `lights restart`, and open pages reload themselves.

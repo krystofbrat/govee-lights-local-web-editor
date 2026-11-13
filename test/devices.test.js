@@ -152,6 +152,19 @@ test('a white goes dim as its color, and a new color ends it', async () => {
   assert.equal(devices.view(d).state.dim, null);
 });
 
+test('a light that comes on dimmer than it was gets its brightness first, so it doesn\'t flash', async () => {
+  const { devices, d, sent } = lanLight();
+  Object.assign(d.state, { power: false, brightness: 80 });
+  await devices.applyOne(d, { brightness: 1, color: '#ff1e00' }); // a sunrise's first step
+  assert.deepEqual(sent, [{ brightness: 1 }, { turn: true }, { brightness: 1 }, { rgb: [255, 30, 0], kelvin: 0 }]);
+
+  // Coming on brighter than it was: the usual order
+  sent.length = 0;
+  Object.assign(d.state, { power: false, brightness: 10 });
+  await devices.applyOne(d, { brightness: 50, color: '#ff8800' });
+  assert.deepEqual(sent, [{ turn: true }, { rgb: [255, 136, 0], kelvin: 0 }, { brightness: 50 }]);
+});
+
 test('a light without color LEDs says it can\'t go below 1%', async () => {
   const d = makeDevices({ apiKey: 'k' });
   const lamp = d.get(LAMP);
